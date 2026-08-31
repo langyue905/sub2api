@@ -79,7 +79,7 @@ var ProviderSet = wire.NewSet(
 	NewPromoCodeRepository,
 	NewAnnouncementRepository,
 	NewAnnouncementReadRepository,
-	NewUsageLogRepository,
+	ProvideUsageLogRepository,
 	NewUsageBillingRepository,
 	NewBatchImageRepository,
 	NewIdempotencyRepository,
@@ -103,6 +103,7 @@ var ProviderSet = wire.NewSet(
 	NewChannelMonitorRequestTemplateRepository,
 	NewContentModerationRepository,
 	NewAffiliateRepository,
+	NewAgentRepository,
 	NewUserPlatformQuotaRepository,     // T14: user × platform quota
 	NewUserPlatformQuotaServiceAdapter, // T14: adapter → service.UserPlatformQuotaRepository
 
@@ -169,6 +170,19 @@ var ProviderSet = wire.NewSet(
 	ProvideSQLDB,
 	ProvideRedis,
 )
+
+// ProvideUsageLogRepository wires the optional agent commission callback while
+// preserving NewUsageLogRepository's two-argument constructor for tests and
+// external callers.
+func ProvideUsageLogRepository(client *ent.Client, db *sql.DB, recorder service.AgentCommissionRecorder) service.UsageLogRepository {
+	repo := NewUsageLogRepository(client, db)
+	if setter, ok := repo.(interface {
+		SetAgentCommissionRecorder(service.AgentCommissionRecorder)
+	}); ok {
+		setter.SetAgentCommissionRecorder(recorder)
+	}
+	return repo
+}
 
 // ProvideEnt 为依赖注入提供 Ent 客户端。
 //

@@ -114,6 +114,7 @@ type usageLogCreateResult struct {
 type usageLogBestEffortRequest struct {
 	prepared usageLogInsertPrepared
 	apiKeyID int64
+	log      *service.UsageLog
 	resultCh chan error
 }
 
@@ -188,6 +189,7 @@ func (r *usageLogRepository) CreateBestEffort(ctx context.Context, log *service.
 	req := usageLogBestEffortRequest{
 		prepared: prepareUsageLogInsert(log),
 		apiKeyID: log.APIKeyID,
+		log:      log,
 		resultCh: make(chan error, 1),
 	}
 	if key, ok := r.bestEffortRecentKey(req.prepared.requestID, req.apiKeyID); ok {
@@ -304,12 +306,14 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 				return false, err
 			}
 			log.RateMultiplier = prepared.rateMultiplier
+			r.recordAgentCommissionBestEffort(context.Background(), log)
 			return false, nil
 		} else {
 			return false, err
 		}
 	}
 	log.RateMultiplier = prepared.rateMultiplier
+	r.recordAgentCommissionBestEffort(context.Background(), log)
 	return true, nil
 }
 
@@ -504,6 +508,9 @@ func (r *usageLogRepository) flushCreateBatch(db *sql.DB, batch []usageLogCreate
 							req.log.ID = state.ID
 							req.log.CreatedAt = state.CreatedAt
 						}
+						if idx == 0 && hasState {
+							r.recordAgentCommissionBestEffort(context.Background(), req.log)
+						}
 						switch {
 						case inserted && idx == 0:
 							completeUsageLogCreateRequest(req, usageLogCreateResult{inserted: true, err: nil})
@@ -536,6 +543,9 @@ func (r *usageLogRepository) flushCreateBatch(db *sql.DB, batch []usageLogCreate
 					req.log.ID = state.ID
 					req.log.CreatedAt = state.CreatedAt
 					req.log.RateMultiplier = preparedByKey[key].rateMultiplier
+					if idx == 0 {
+						r.recordAgentCommissionBestEffort(context.Background(), req.log)
+					}
 					completeUsageLogCreateRequest(req, usageLogCreateResult{
 						inserted: idx == 0 && insertedMap[key],
 						err:      nil,
@@ -613,6 +623,9 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 			} else if group.prepared.requestID != "" && r != nil && r.bestEffortRecent != nil {
 				r.bestEffortRecent.SetDefault(group.key, struct{}{})
 			}
+			if singleErr == nil && len(group.reqs) > 0 {
+				r.recordAgentCommissionBestEffort(context.Background(), group.reqs[0].log)
+			}
 			for _, req := range group.reqs {
 				sendUsageLogBestEffortResult(req.resultCh, singleErr)
 			}
@@ -622,6 +635,9 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 	for _, group := range groupOrder {
 		if group.prepared.requestID != "" && r != nil && r.bestEffortRecent != nil {
 			r.bestEffortRecent.SetDefault(group.key, struct{}{})
+		}
+		if len(group.reqs) > 0 {
+			r.recordAgentCommissionBestEffort(context.Background(), group.reqs[0].log)
 		}
 		for _, req := range group.reqs {
 			sendUsageLogBestEffortResult(req.resultCh, nil)

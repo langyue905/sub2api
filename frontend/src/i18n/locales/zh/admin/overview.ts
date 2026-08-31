@@ -431,6 +431,72 @@ export default {
       }
     },
 
+    agents: {
+      title: '代理管理',
+      description: '管理严格一层的代理关系、消费佣金和提现申请',
+      searchPlaceholder: '邮箱、用户名或代理 ID',
+      tabs: {
+        profiles: '代理列表',
+        withdrawals: '提现申请'
+      },
+      columns: {
+        agent: '代理',
+        customers: '直属客户',
+        usage: '客户消费',
+        rate: '佣金比例',
+        pending: '待提现佣金',
+        status: '状态',
+        actions: '操作'
+      },
+      rate: {
+        auto: '自动'
+      },
+      status: {
+        all: '全部',
+        pending: '待处理',
+        paid: '已支付',
+        rejected: '已拒绝',
+        enabled: '已启用',
+        disabled: '已停用',
+        unknown: '未知'
+      },
+      actions: {
+        enable: '启用',
+        disable: '停用',
+        pay: '标记已支付',
+        reject: '拒绝'
+      },
+      assign: {
+        title: '绑定直属客户',
+        hint: '每个客户只能绑定一个代理；代理账号不能再作为其他代理的客户。填 0 可解除绑定。',
+        customerId: '客户 ID',
+        agentId: '代理 ID',
+        submit: '保存绑定',
+        invalid: '请输入有效的客户 ID 和代理 ID',
+        success: '代理关系已更新'
+      },
+      customers: {
+        title: '{name} 的直属客户',
+        hint: '这里只显示直属客户，不会递归展示或计算二级关系。',
+        columns: {
+          customer: '客户',
+          usage: '消费金额',
+          requests: '请求数',
+          joinedAt: '绑定时间'
+        }
+      },
+      withdrawals: {
+        amount: '提现金额',
+        payment: '收款信息',
+        note: '备注',
+        viewQr: '查看收款码',
+        processed: '提现状态已更新'
+      },
+      errors: {
+        loadFailed: '加载代理数据失败'
+      }
+    },
+
     // Users Management
     users: {
       title: '用户管理',

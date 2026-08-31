@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/handler/quotaview"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -230,6 +231,120 @@ func (h *UserHandler) TransferAffiliateQuota(c *gin.Context) {
 		"transferred_quota": transferred,
 		"balance":           balance,
 	})
+}
+
+// GetAgentSummary returns the current user's one-level agent summary.
+// GET /api/v1/user/agent/summary
+func (h *UserHandler) GetAgentSummary(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	summary, err := h.affiliateService.GetAgentSummary(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, summary)
+}
+
+// ListAgentCustomers lists only direct customers (users.agent_id = current
+// user); no recursive expansion is performed.
+// GET /api/v1/user/agent/customers
+func (h *UserHandler) ListAgentCustomers(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	page, pageSize := response.ParsePagination(c)
+	items, total, err := h.affiliateService.ListAgentCustomers(c.Request.Context(), subject.UserID, pagination.PaginationParams{Page: page, PageSize: pageSize})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, items, total, page, pageSize)
+}
+
+// ListAgentCommissions lists direct-customer commissions only.
+// GET /api/v1/user/agent/commissions
+func (h *UserHandler) ListAgentCommissions(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	page, pageSize := response.ParsePagination(c)
+	items, total, err := h.affiliateService.ListAgentCommissions(c.Request.Context(), subject.UserID, pagination.PaginationParams{Page: page, PageSize: pageSize})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, items, total, page, pageSize)
+}
+
+// ListAgentWithdrawals lists this user's own withdrawal requests.
+// GET /api/v1/user/agent/withdrawals
+func (h *UserHandler) ListAgentWithdrawals(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	page, pageSize := response.ParsePagination(c)
+	items, total, err := h.affiliateService.ListAgentWithdrawals(c.Request.Context(), subject.UserID, pagination.PaginationParams{Page: page, PageSize: pageSize})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, items, total, page, pageSize)
+}
+
+type CreateAgentWithdrawalRequest struct {
+	Amount         float64 `json:"amount"`
+	PaymentAccount string  `json:"payment_account"`
+	PaymentQRCode  string  `json:"payment_qr_code"`
+	Note           string  `json:"note"`
+}
+
+// CreateAgentWithdrawal reserves pending commission and creates a withdrawal
+// request atomically. The amount is in the user's currency units.
+// POST /api/v1/user/agent/withdrawals
+func (h *UserHandler) CreateAgentWithdrawal(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	var req CreateAgentWithdrawalRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	item, err := h.affiliateService.CreateAgentWithdrawal(c.Request.Context(), subject.UserID, req.Amount, req.PaymentAccount, req.PaymentQRCode, req.Note)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// TransferAgentCommission transfers all currently pending commissions into the
+// authenticated user's balance.
+// POST /api/v1/user/agent/transfer
+func (h *UserHandler) TransferAgentCommission(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	amount, err := h.affiliateService.TransferAgentCommission(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"transferred_amount": amount})
 }
 
 type StartIdentityBindingRequest struct {

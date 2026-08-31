@@ -205,7 +205,11 @@ type AffiliateUserOverview struct {
 }
 
 type AffiliateService struct {
-	repo                 AffiliateRepository
+	repo AffiliateRepository
+	// agentRepo is deliberately optional.  Keeping it out of the constructor
+	// preserves compatibility with existing AffiliateRepository test doubles
+	// and allows rolling upgrades before migration 232 has been applied.
+	agentRepo            AgentRepository
 	settingService       *SettingService
 	authCacheInvalidator APIKeyAuthCacheInvalidator
 	billingCacheService  *BillingCacheService

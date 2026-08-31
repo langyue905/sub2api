@@ -128,8 +128,25 @@ func RegisterAdminRoutes(
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
 
+		// 代理佣金（严格一层直属客户关系）
+		registerAgentRoutes(admin, h)
+
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerAgentRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	agents := admin.Group("/agents")
+	{
+		agents.GET("/profiles", h.Admin.Affiliate.ListAgentProfiles)
+		agents.PUT("/profiles/:user_id", h.Admin.Affiliate.UpsertAgentProfile)
+		agents.POST("/assign", h.Admin.Affiliate.AssignAgentCustomer)
+		// Register static path before the parameterized customer path to keep
+		// /withdrawals from being interpreted as an agent id.
+		agents.GET("/withdrawals", h.Admin.Affiliate.ListAgentWithdrawals)
+		agents.POST("/withdrawals/:id/process", h.Admin.Affiliate.ProcessAgentWithdrawal)
+		agents.GET("/:agent_id/customers", h.Admin.Affiliate.ListAgentCustomers)
 	}
 }
 

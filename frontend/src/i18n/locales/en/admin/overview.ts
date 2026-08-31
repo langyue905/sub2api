@@ -431,6 +431,72 @@ export default {
       }
     },
 
+    agents: {
+      title: 'Agent Management',
+      description: 'Manage strict one-level agent relationships, commissions, and withdrawals',
+      searchPlaceholder: 'Email, username, or agent ID',
+      tabs: {
+        profiles: 'Agents',
+        withdrawals: 'Withdrawals'
+      },
+      columns: {
+        agent: 'Agent',
+        customers: 'Direct Customers',
+        usage: 'Customer Usage',
+        rate: 'Commission Rate',
+        pending: 'Pending Commission',
+        status: 'Status',
+        actions: 'Actions'
+      },
+      rate: {
+        auto: 'Auto'
+      },
+      status: {
+        all: 'All',
+        pending: 'Pending',
+        paid: 'Paid',
+        rejected: 'Rejected',
+        enabled: 'Enabled',
+        disabled: 'Disabled',
+        unknown: 'Unknown'
+      },
+      actions: {
+        enable: 'Enable',
+        disable: 'Disable',
+        pay: 'Mark Paid',
+        reject: 'Reject'
+      },
+      assign: {
+        title: 'Assign Direct Customer',
+        hint: 'Each customer has at most one agent. An agent cannot also be a customer of another agent. Use 0 to unassign.',
+        customerId: 'Customer ID',
+        agentId: 'Agent ID',
+        submit: 'Save Assignment',
+        invalid: 'Enter valid customer and agent IDs',
+        success: 'Agent relationship updated'
+      },
+      customers: {
+        title: 'Direct customers of {name}',
+        hint: 'Only direct customers are shown. Deeper relationships are never traversed or commissioned.',
+        columns: {
+          customer: 'Customer',
+          usage: 'Usage',
+          requests: 'Requests',
+          joinedAt: 'Bound At'
+        }
+      },
+      withdrawals: {
+        amount: 'Amount',
+        payment: 'Payment',
+        note: 'Note',
+        viewQr: 'View QR code',
+        processed: 'Withdrawal status updated'
+      },
+      errors: {
+        loadFailed: 'Failed to load agent data'
+      }
+    },
+
     // Users
     users: {
       title: 'User Management',

@@ -47,6 +47,11 @@ const (
 	AirwallexDemoStaticDomain = "https://static-demo.airwallex.com"
 	// AirwallexDemoCheckoutDomain 是 Airwallex 沙箱环境收银台元素和 iframe 域名。
 	AirwallexDemoCheckoutDomain = "https://checkout-demo.airwallex.com"
+	// ImagePlaygroundPathPrefix is the only embedded third-party-style static
+	// application served by the frontend. It needs a same-origin frame policy
+	// because the Sub shell hosts it in an iframe.
+	ImagePlaygroundPathPrefix = "/playgrounds/image/"
+	ImagePlaygroundAPIOrigin  = "https://api.zshai.cc"
 )
 
 var requiredCSPDirectiveValues = []struct {
@@ -119,6 +124,11 @@ func SecurityHeaders(cfg config.CSPConfig, getFrameSrcOrigins func() []string) g
 
 	return func(c *gin.Context) {
 		finalPolicy := policy
+		requestPath := ""
+		if c != nil && c.Request != nil && c.Request.URL != nil {
+			requestPath = c.Request.URL.Path
+		}
+		isImagePlayground := isImagePlaygroundPath(requestPath)
 		if getFrameSrcOrigins != nil {
 			for _, origin := range getFrameSrcOrigins() {
 				if origin != "" {
@@ -128,7 +138,16 @@ func SecurityHeaders(cfg config.CSPConfig, getFrameSrcOrigins func() []string) g
 		}
 
 		c.Header("X-Content-Type-Options", "nosniff")
-		c.Header("X-Frame-Options", "DENY")
+		if isImagePlayground {
+			// The image playground is intentionally embedded by the authenticated
+			// Sub shell. Keep the exception same-origin and path-scoped.
+			c.Header("X-Frame-Options", "SAMEORIGIN")
+			finalPolicy = allowSameOriginFrameEmbedding(finalPolicy)
+			finalPolicy = addToDirective(finalPolicy, "connect-src", ImagePlaygroundAPIOrigin)
+			finalPolicy = addToDirective(finalPolicy, "img-src", ImagePlaygroundAPIOrigin)
+		} else {
+			c.Header("X-Frame-Options", "DENY")
+		}
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 		if isAPIRoutePath(c) {
 			c.Next()
@@ -149,6 +168,32 @@ func SecurityHeaders(cfg config.CSPConfig, getFrameSrcOrigins func() []string) g
 		}
 		c.Next()
 	}
+}
+
+// isImagePlaygroundPath deliberately requires the slash after "image" so a
+// similarly named route (for example /playgrounds/image-admin) is unaffected.
+func isImagePlaygroundPath(path string) bool {
+	return strings.HasPrefix(strings.TrimSpace(path), ImagePlaygroundPathPrefix)
+}
+
+// allowSameOriginFrameEmbedding replaces any existing frame-ancestors policy
+// for the playground response. Keeping only 'self' prevents custom policies
+// from accidentally allowing arbitrary embedding origins.
+func allowSameOriginFrameEmbedding(policy string) string {
+	parts := strings.Split(policy, ";")
+	found := false
+	for i, raw := range parts {
+		fields := strings.Fields(strings.TrimSpace(raw))
+		if len(fields) == 0 || fields[0] != "frame-ancestors" {
+			continue
+		}
+		parts[i] = " frame-ancestors 'self'"
+		found = true
+	}
+	if found {
+		return strings.Join(parts, ";")
+	}
+	return addToDirective(policy, "frame-ancestors", "'self'")
 }
 
 func isAPIRoutePath(c *gin.Context) bool {

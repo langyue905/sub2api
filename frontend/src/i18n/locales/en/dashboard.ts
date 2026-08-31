@@ -703,6 +703,63 @@ export default {
     }
   },
 
+  agent: {
+    title: 'Agent Center',
+    description: 'Review direct customer usage and manage one-level commissions',
+    enabled: 'Agent enabled',
+    disabled: 'Agent disabled',
+    loadFailed: 'Failed to load agent data',
+    errors: {
+      loadFailed: 'Failed to load agent data'
+    },
+    stats: {
+      rate: 'Current commission rate',
+      directCustomers: 'Direct customers',
+      pending: 'Withdrawable commission',
+      total: 'Total commission'
+    },
+    balance: {
+      title: 'Commission balance',
+      description: 'Transfer pending commission to your account balance before using it.',
+      transfer: 'Transfer to balance',
+      success: 'Commission transferred to balance'
+    },
+    tabs: {
+      customers: 'Direct customers',
+      commissions: 'Commission details',
+      withdrawals: 'Withdrawals'
+    },
+    customers: {
+      hint: 'Agent relationships have one level only; customer subtrees are never shown.',
+      customer: 'Customer',
+      usage: 'Usage',
+      requests: 'Requests',
+      joinedAt: 'Bound at'
+    },
+    commissions: {
+      customer: 'Customer ID',
+      model: 'Model',
+      usage: 'Customer usage',
+      commission: 'Commission',
+      createdAt: 'Created at'
+    },
+    withdrawals: {
+      amount: 'Amount',
+      paymentAccount: 'Payment account',
+      note: 'Note',
+      status: 'Status',
+      createdAt: 'Created at',
+      submit: 'Submit withdrawal',
+      success: 'Withdrawal submitted'
+    },
+    status: {
+      pending: 'Pending',
+      paid: 'Paid',
+      rejected: 'Rejected',
+      unknown: 'Unknown'
+    }
+  },
+
   // Redeem
   redeem: {
     title: 'Redeem Code',
