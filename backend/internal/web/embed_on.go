@@ -118,12 +118,24 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 }
 
 func (s *FrontendServer) fileExists(path string) bool {
-	file, err := s.distFS.Open(path)
+	file, err := s.distFS.Open(normalizeEmbeddedLookupPath(path))
 	if err != nil {
 		return false
 	}
 	_ = file.Close()
 	return true
+}
+
+// normalizeEmbeddedLookupPath makes directory requests compatible with
+// embed.FS, whose Open method does not accept a trailing slash. The original
+// request path is kept for http.FileServer so it can apply its normal
+// directory/index handling and redirects.
+func normalizeEmbeddedLookupPath(path string) string {
+	path = strings.TrimRight(path, "/")
+	if path == "" {
+		return "index.html"
+	}
+	return path
 }
 
 // tryServeOverride checks if a local override file exists and serves it.
@@ -321,7 +333,7 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 			cleanPath = "index.html"
 		}
 
-		if file, err := distFS.Open(cleanPath); err == nil {
+		if file, err := distFS.Open(normalizeEmbeddedLookupPath(cleanPath)); err == nil {
 			_ = file.Close()
 			// Try local override first
 			if tryServeOverrideFile(c, overrideDir, cleanPath) {
