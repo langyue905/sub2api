@@ -468,7 +468,7 @@ export default {
       },
       assign: {
         title: 'Assign Direct Customer',
-        hint: 'Each customer has at most one agent. An agent cannot also be a customer of another agent. Use 0 to unassign.',
+        hint: 'Each customer has at most one direct agent. An agent may also be a customer of another agent. Use 0 to unassign.',
         customerId: 'Customer ID',
         agentId: 'Agent ID',
         submit: 'Save Assignment',

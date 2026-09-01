@@ -95,13 +95,9 @@ FOR UPDATE`, userID).Scan(&agentID, &deletedAt); err != nil {
 	if deletedAt.Valid {
 		return nil, service.ErrAgentUserNotFound
 	}
-	// A user that is already a customer's customer cannot become an agent;
-	// otherwise commissions could be forwarded through a second level.  The
-	// role boundary applies even while a profile is disabled: a disabled agent
-	// remains an agent until its profile is removed.
-	if agentID.Valid && agentID.Int64 != 0 {
-		return nil, service.ErrAgentNested
-	}
+	// agent_id is deliberately not a role boundary. A user may be both a
+	// direct customer of one agent and an agent with its own direct customers;
+	// commission recording is always limited to the single direct edge.
 
 	var totalUsage float64
 	var existingManual int
@@ -206,10 +202,6 @@ FOR UPDATE`, agentID).Scan(&parentAgentID, &agentDeletedAt); err != nil {
 	if agentDeletedAt.Valid {
 		return service.ErrAgentUserNotFound
 	}
-	if parentAgentID.Valid && parentAgentID.Int64 != 0 {
-		return service.ErrAgentNested
-	}
-
 	var enabled bool
 	if err := tx.QueryRowContext(ctx, "SELECT enabled FROM agent_profiles WHERE user_id = $1 FOR UPDATE", agentID).Scan(&enabled); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -220,16 +212,6 @@ FOR UPDATE`, agentID).Scan(&parentAgentID, &agentDeletedAt); err != nil {
 	if !enabled {
 		return service.ErrAgentDisabled
 	}
-	// Do not make an existing agent a customer.  This catches stale profiles
-	// even if the agent_id column itself is currently NULL.
-	var customerIsAgent bool
-	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM agent_profiles WHERE user_id = $1)", customerUserID).Scan(&customerIsAgent); err != nil {
-		return fmt.Errorf("check nested customer: %w", err)
-	}
-	if customerIsAgent {
-		return service.ErrAgentNested
-	}
-
 	if _, err := tx.ExecContext(ctx, "UPDATE users SET agent_id = $1, updated_at = NOW() WHERE id = $2", agentID, customerUserID); err != nil {
 		return fmt.Errorf("assign customer agent: %w", err)
 	}
@@ -699,30 +681,6 @@ FOR UPDATE`, usage.UserID).Scan(&agentID); err != nil {
 		return fmt.Errorf("load usage customer: %w", err)
 	}
 	if !agentID.Valid || agentID.Int64 <= 0 || agentID.Int64 == usage.UserID {
-		return nil
-	}
-
-	// A dirty or concurrently migrated database may still contain a profile
-	// for the usage customer.  Such a user is an agent, not a billable
-	// downstream customer; skip rather than forwarding a second-level reward.
-	var usageCustomerIsAgent bool
-	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM agent_profiles WHERE user_id = $1)", usage.UserID).Scan(&usageCustomerIsAgent); err != nil {
-		return fmt.Errorf("check usage customer agent role: %w", err)
-	}
-	if usageCustomerIsAgent {
-		return nil
-	}
-
-	// If the agent has subsequently become a customer, do not recurse or pay
-	// an indirect parent.  This also protects databases migrated from old data.
-	var parentAgent sql.NullInt64
-	if err := tx.QueryRowContext(ctx, "SELECT agent_id FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", agentID.Int64).Scan(&parentAgent); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		return fmt.Errorf("load usage agent: %w", err)
-	}
-	if parentAgent.Valid && parentAgent.Int64 != 0 {
 		return nil
 	}
 

@@ -316,8 +316,8 @@ type AssignAgentCustomerRequest struct {
 }
 
 // AssignAgentCustomer binds or unbinds one direct customer. Sending null/0
-// agent_id clears the binding; nested bindings are rejected by the service and
-// database trigger.
+// agent_id clears the binding. A user may be both a direct customer and an
+// agent; commissions still settle only on the selected direct edge.
 // POST /api/v1/admin/agents/assign
 func (h *AffiliateHandler) AssignAgentCustomer(c *gin.Context) {
 	var req AssignAgentCustomerRequest

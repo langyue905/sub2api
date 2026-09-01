@@ -154,10 +154,10 @@ type AgentWithdrawalFilter struct {
 	PageSize int
 }
 
-// AgentRepository is intentionally separate from AffiliateRepository.  The
+// AgentRepository is intentionally separate from AffiliateRepository. The
 // existing affiliate repository models recharge rebates and its test doubles
-// must remain source-compatible.  Implementations must enforce the one-level
-// invariant when assigning customers and when recording commissions.
+// must remain source-compatible. Implementations settle each usage event only
+// against its direct agent; a user may also be an agent for other customers.
 type AgentRepository interface {
 	GetProfile(ctx context.Context, userID int64) (*AgentProfile, error)
 	UpsertProfile(ctx context.Context, userID int64, enabled bool, manualRateBPS int) (*AgentProfile, error)
