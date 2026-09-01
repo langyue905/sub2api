@@ -14,7 +14,7 @@ func TestAgentRepositoryAssignCustomerAllowsAgentWithAnUpstreamAgent(t *testing.
 	if err != nil {
 		t.Fatalf("create sql mock: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	repo := &agentRepository{db: db}
 	mock.ExpectBegin()
@@ -45,7 +45,7 @@ func TestAgentRepositoryUpsertProfileAllowsExistingCustomer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create sql mock: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	repo := &agentRepository{db: db}
 	mock.ExpectBegin()
@@ -85,7 +85,7 @@ func TestAgentRepositoryRecordsDirectCommissionForAgentCustomer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create sql mock: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	repo := &agentRepository{db: db}
 	mock.ExpectBegin()
