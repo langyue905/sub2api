@@ -586,6 +586,7 @@ export default {
       },
       columns: {
         user: 'User',
+        userEmail: 'User Email',
         id: 'ID',
         email: 'Email',
         username: 'Username',

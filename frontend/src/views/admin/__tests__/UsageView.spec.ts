@@ -32,6 +32,7 @@ const messages: Record<string, string> = {
   'admin.dashboard.day': 'Day',
   'admin.dashboard.hour': 'Hour',
   'admin.usage.failedToLoadUser': 'Failed to load user',
+	'admin.usage.username': 'Username',
 	'admin.usage.requestId': 'Request ID',
 	'usage.requestedModel': 'Requested model',
 	'usage.sentUpstreamModel': 'Sent upstream model',
@@ -703,6 +704,7 @@ describe('admin UsageView model audit export', () => {
 				id: 1,
 				created_at: '2026-08-04T00:00:00Z',
 				model: 'gpt-5.6-sol',
+				user: { id: 7, username: 'export-user', email: 'export@example.com' },
 				upstream_model: 'gpt-5.5',
 				upstream_response_model: 'gpt-5.4',
 				upstream_model_mismatch: true,
@@ -747,6 +749,7 @@ describe('admin UsageView model audit export', () => {
 		)
 
 		const headers = aoaToSheet.mock.calls[0][0][0]
+		expect(headers[1]).toBe('Username')
 		expect(headers.slice(4, 8)).toEqual([
 			'Requested model',
 			'Sent upstream model',
@@ -754,6 +757,7 @@ describe('admin UsageView model audit export', () => {
 			'Upstream model mismatch',
 		])
 		const row = sheetAddAoa.mock.calls[0][1][0]
+		expect(row[1]).toBe('export-user')
 		expect(row.slice(4, 8)).toEqual(['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'Yes'])
 		expect(saveAs).toHaveBeenCalledTimes(1)
 	})

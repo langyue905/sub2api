@@ -82,6 +82,7 @@ const DataTableStub = {
   template: `
     <div>
       <div data-test="columns">{{ columns.map(col => col.key).join(',') }}</div>
+      <div data-test="column-labels">{{ columns.map(col => col.label).join(',') }}</div>
       <div data-test="row-order">{{ data.map(row => row.email).join(',') }}</div>
       <div data-test="selected-keys">{{ (selectedKeys || []).join(',') }}</div>
       <button data-test="sort-last-used" @click="$emit('sort', 'last_used_at', 'desc')">sort</button>
@@ -182,6 +183,12 @@ describe('admin UsersView', () => {
 
     const columns = wrapper.get('[data-test="columns"]').text()
     const visibleColumns = columns.split(',')
+    expect(visibleColumns.slice(0, 3)).toEqual(['username', 'id', 'email'])
+    expect(wrapper.get('[data-test="column-labels"]').text().split(',').slice(0, 3)).toEqual([
+      'admin.users.columns.username',
+      'admin.users.columns.id',
+      'admin.users.columns.userEmail',
+    ])
     expect(visibleColumns.slice(-4, -1)).toEqual(['last_active_at', 'last_used_at', 'created_at'])
     expect(visibleColumns).not.toContain('last_login_at')
 

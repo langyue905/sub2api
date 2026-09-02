@@ -183,6 +183,26 @@ type UserRepository interface {
 	DisableTotp(ctx context.Context, userID int64) error
 }
 
+// UsernameLookupRepository is implemented by repositories that support
+// resolving a local account username. It is intentionally kept separate from
+// UserRepository so existing test doubles and non-login repositories remain
+// source-compatible.
+type UsernameLookupRepository interface {
+	GetByUsername(ctx context.Context, username string) (*User, error)
+}
+
+// UsernameAvailabilityRepository is implemented by repositories that can
+// check username availability without loading a complete user record.
+type UsernameAvailabilityRepository interface {
+	ExistsByUsername(ctx context.Context, username string) (bool, error)
+}
+
+// NormalizeUsername applies the same whitespace normalization used by login
+// and username availability checks.
+func NormalizeUsername(username string) string {
+	return strings.TrimSpace(username)
+}
+
 // RegistrationEmailDomainRepository 是生产用户仓储为非白名单域名单账户兜底策略提供的可选能力。
 // 它独立于 UserRepository，避免无关测试桩和服务消费者实现注册专用方法。
 type RegistrationEmailDomainRepository interface {

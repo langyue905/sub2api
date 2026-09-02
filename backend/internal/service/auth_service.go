@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
@@ -24,9 +25,12 @@ import (
 )
 
 var (
-	ErrInvalidCredentials           = infraerrors.Unauthorized("INVALID_CREDENTIALS", "invalid email or password")
+	ErrInvalidCredentials           = infraerrors.Unauthorized("INVALID_CREDENTIALS", "invalid username/email or password")
 	ErrUserNotActive                = infraerrors.Forbidden("USER_NOT_ACTIVE", "user is not active")
 	ErrEmailExists                  = infraerrors.Conflict("EMAIL_EXISTS", "email already exists")
+	ErrUsernameRequired             = infraerrors.BadRequest("USERNAME_REQUIRED", "username is required")
+	ErrUsernameInvalid              = infraerrors.BadRequest("USERNAME_INVALID", "username is invalid")
+	ErrUsernameExists               = infraerrors.Conflict("USERNAME_EXISTS", "username already exists")
 	ErrEmailReserved                = infraerrors.BadRequest("EMAIL_RESERVED", "email is reserved")
 	ErrInvalidToken                 = infraerrors.Unauthorized("INVALID_TOKEN", "invalid token")
 	ErrTokenExpired                 = infraerrors.Unauthorized("TOKEN_EXPIRED", "token has expired")
@@ -161,9 +165,39 @@ func (s *AuthService) Register(ctx context.Context, email, password string) (str
 
 // RegisterWithVerification 用户注册（支持邮件验证、优惠码、邀请码和邀请返利码），返回token和用户。
 func (s *AuthService) RegisterWithVerification(ctx context.Context, email, password, verifyCode, promoCode, invitationCode, affiliateCode string) (string, *User, error) {
+	// 保留旧的服务层签名，供 OAuth/历史调用方和旧测试使用。HTTP 普通注册
+	// 通过 RegisterWithUsernameAndVerification 进入用户名必填路径。
+	return s.registerWithVerification(ctx, email, password, "", verifyCode, promoCode, invitationCode, affiliateCode)
+}
+
+// RegisterWithUsernameAndVerification 注册普通邮箱账号并设置用户名。
+// username 只对本地邮箱密码注册强制要求；OAuth/SSO 流程继续使用上面的
+// 兼容方法，避免第三方资料字段变化影响现有登录。
+func (s *AuthService) RegisterWithUsernameAndVerification(ctx context.Context, email, password, username, verifyCode, promoCode, invitationCode, affiliateCode string) (string, *User, error) {
+	// Preserve the existing registration gate and its error precedence before
+	// validating fields that are only relevant to an enabled registration flow.
+	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
+		return "", nil, ErrRegDisabled
+	}
+	normalizedUsername, err := normalizeRegistrationUsername(username)
+	if err != nil {
+		return "", nil, err
+	}
+	return s.registerWithVerification(ctx, email, password, normalizedUsername, verifyCode, promoCode, invitationCode, affiliateCode)
+}
+
+func (s *AuthService) registerWithVerification(ctx context.Context, email, password, username, verifyCode, promoCode, invitationCode, affiliateCode string) (string, *User, error) {
 	// 检查是否开放注册（默认关闭：settingService 未配置时不允许注册）
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 		return "", nil, ErrRegDisabled
+	}
+
+	if username != "" {
+		var err error
+		username, err = normalizeRegistrationUsername(username)
+		if err != nil {
+			return "", nil, err
+		}
 	}
 
 	// 防止用户注册 LinuxDo OAuth 合成邮箱，避免第三方登录与本地账号发生碰撞。
@@ -219,6 +253,11 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 	if err := s.validateRegistrationEmailQuota(ctx, email); err != nil {
 		return "", nil, err
 	}
+	if username != "" {
+		if err := s.ensureUsernameAvailable(ctx, username); err != nil {
+			return "", nil, err
+		}
+	}
 
 	// 密码哈希
 	hashedPassword, err := s.HashPassword(password)
@@ -237,6 +276,7 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 	// 创建用户
 	user := &User{
 		Email:        email,
+		Username:     username,
 		PasswordHash: hashedPassword,
 		Role:         RoleUser,
 		Balance:      grantPlan.Balance,
@@ -250,6 +290,8 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		switch {
 		case errors.Is(err, ErrEmailExists):
 			return "", nil, ErrEmailExists
+		case errors.Is(err, ErrUsernameExists):
+			return "", nil, ErrUsernameExists
 		case errors.Is(err, ErrEmailDomainRegistrationLimit):
 			return "", nil, ErrEmailDomainRegistrationLimit
 		case errors.Is(err, ErrInvitationCodeInvalid):
@@ -297,6 +339,45 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 	}
 
 	return token, user, nil
+}
+
+func normalizeRegistrationUsername(raw string) (string, error) {
+	username := NormalizeUsername(raw)
+	if username == "" {
+		return "", ErrUsernameRequired
+	}
+	if len([]rune(username)) > 100 {
+		return "", ErrUsernameInvalid
+	}
+	for _, r := range username {
+		// Keep the login identifier unambiguous and avoid control/whitespace
+		// characters that are difficult to enter or display consistently.
+		if r == '@' || unicode.IsSpace(r) || unicode.IsControl(r) {
+			return "", ErrUsernameInvalid
+		}
+	}
+	return username, nil
+}
+
+func (s *AuthService) ensureUsernameAvailable(ctx context.Context, username string) error {
+	lookup, ok := s.userRepo.(UsernameAvailabilityRepository)
+	if !ok {
+		// Existing unit test doubles intentionally do not implement the optional
+		// capability. Production repositories must provide it.
+		if s.entClient != nil {
+			return ErrServiceUnavailable
+		}
+		return nil
+	}
+	exists, err := lookup.ExistsByUsername(ctx, username)
+	if err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Database error checking username exists: %v", err)
+		return ErrServiceUnavailable
+	}
+	if exists {
+		return ErrUsernameExists
+	}
+	return nil
 }
 
 // SendVerifyCodeResult 发送验证码返回结果
@@ -531,10 +612,22 @@ func (s *AuthService) IsEmailVerifyEnabled(ctx context.Context) bool {
 	return s.settingService.IsEmailVerifyEnabled(ctx)
 }
 
-// Login 用户登录，返回JWT token
-func (s *AuthService) Login(ctx context.Context, email, password string) (string, *User, error) {
-	// 查找用户
-	user, err := s.userRepo.GetByEmail(ctx, email)
+// Login 用户登录，返回JWT token。identifier 可以是邮箱或用户名；邮箱查询
+// 优先，以兼容旧客户端和处理邮箱/用户名同名的歧义。
+func (s *AuthService) Login(ctx context.Context, identifier, password string) (string, *User, error) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return "", nil, ErrInvalidCredentials
+	}
+
+	// 先按邮箱查找，未找到时再按用户名查找。密码找回、邮箱验证码等
+	// 其他路径仍然直接调用 GetByEmail，不会被用户名混合查询影响。
+	user, err := s.userRepo.GetByEmail(ctx, identifier)
+	if errors.Is(err, ErrUserNotFound) {
+		if lookup, ok := s.userRepo.(UsernameLookupRepository); ok {
+			user, err = lookup.GetByUsername(ctx, identifier)
+		}
+	}
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			return "", nil, ErrInvalidCredentials
