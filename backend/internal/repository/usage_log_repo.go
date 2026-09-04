@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -9,7 +8,6 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	gocache "github.com/patrickmn/go-cache"
 )
@@ -145,13 +143,6 @@ type usageLogRepository struct {
 	sql    sqlExecutor
 	db     *sql.DB
 
-	// agentCommissionRecorder is optional so existing UsageLogRepository test
-	// doubles and rolling deployments remain compatible. It is invoked only
-	// after a usage row has been persisted; failures are logged and never
-	// returned to the billing caller.
-	agentCommissionMu       sync.RWMutex
-	agentCommissionRecorder service.AgentCommissionRecorder
-
 	createBatchOnce     sync.Once
 	createBatchCh       chan usageLogCreateRequest
 	bestEffortBatchOnce sync.Once
@@ -161,42 +152,6 @@ type usageLogRepository struct {
 
 func NewUsageLogRepository(client *dbent.Client, sqlDB *sql.DB) service.UsageLogRepository {
 	return newUsageLogRepositoryWithSQL(client, sqlDB)
-}
-
-// SetAgentCommissionRecorder wires the one-level agent commission hook. The
-// setter is intentionally exposed on the concrete implementation through a
-// small optional interface rather than being added to UsageLogRepository,
-// which would break existing repository stubs.
-func (r *usageLogRepository) SetAgentCommissionRecorder(recorder service.AgentCommissionRecorder) {
-	if r == nil {
-		return
-	}
-	r.agentCommissionMu.Lock()
-	r.agentCommissionRecorder = recorder
-	r.agentCommissionMu.Unlock()
-}
-
-func (r *usageLogRepository) getAgentCommissionRecorder() service.AgentCommissionRecorder {
-	if r == nil {
-		return nil
-	}
-	r.agentCommissionMu.RLock()
-	recorder := r.agentCommissionRecorder
-	r.agentCommissionMu.RUnlock()
-	return recorder
-}
-
-func (r *usageLogRepository) recordAgentCommissionBestEffort(ctx context.Context, log *service.UsageLog) {
-	if r == nil || log == nil {
-		return
-	}
-	recorder := r.getAgentCommissionRecorder()
-	if recorder == nil {
-		return
-	}
-	if err := recorder.RecordAgentCommissionForUsage(ctx, log); err != nil {
-		logger.LegacyPrintf("repository.usage_log", "agent commission recording failed for usage user=%d request=%q: %v", log.UserID, log.RequestID, err)
-	}
 }
 
 func newUsageLogRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *usageLogRepository {

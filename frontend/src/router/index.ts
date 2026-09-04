@@ -276,18 +276,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/agent',
-    name: 'AgentCenter',
-    component: () => import('@/views/user/AgentView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: 'Agent Center',
-      titleKey: 'nav.agentCenter',
-      descriptionKey: 'agent.description'
-    }
-  },
-  {
     path: '/available-channels',
     name: 'UserAvailableChannels',
     component: () => import('@/views/user/AvailableChannelsView.vue'),
@@ -660,18 +648,6 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/admin/affiliates',
     redirect: '/admin/affiliates/invites'
-  },
-  {
-    path: '/admin/agents',
-    name: 'AdminAgents',
-    component: () => import('@/views/admin/affiliates/AdminAgentsView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Agent Management',
-      titleKey: 'nav.agentManagement',
-      descriptionKey: 'admin.agents.description'
-    }
   },
   {
     path: '/admin/affiliates/invites',

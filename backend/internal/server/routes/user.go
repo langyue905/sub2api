@@ -33,17 +33,6 @@ func RegisterUserRoutes(
 			user.PUT("", h.User.UpdateProfile)
 			user.GET("/aff", h.User.GetAffiliate)
 			user.POST("/aff/transfer", h.User.TransferAffiliateQuota)
-
-			// 代理中心：只展示当前用户的直属客户，禁止递归传递。
-			agent := user.Group("/agent")
-			{
-				agent.GET("/summary", h.User.GetAgentSummary)
-				agent.GET("/customers", h.User.ListAgentCustomers)
-				agent.GET("/commissions", h.User.ListAgentCommissions)
-				agent.GET("/withdrawals", h.User.ListAgentWithdrawals)
-				agent.POST("/withdrawals", h.User.CreateAgentWithdrawal)
-				agent.POST("/transfer", h.User.TransferAgentCommission)
-			}
 			user.POST("/account-bindings/email/send-code", h.User.SendEmailBindingCode)
 			user.POST("/account-bindings/email", h.User.BindEmailIdentity)
 			user.DELETE("/account-bindings/:provider", h.User.UnbindIdentity)

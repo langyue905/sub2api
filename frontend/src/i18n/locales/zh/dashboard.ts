@@ -709,63 +709,6 @@ export default {
     }
   },
 
-  agent: {
-    title: '代理中心',
-    description: '查看直属客户消费并管理一层代理佣金',
-    enabled: '代理已启用',
-    disabled: '代理已停用',
-    loadFailed: '加载代理数据失败',
-    errors: {
-      loadFailed: '加载代理数据失败'
-    },
-    stats: {
-      rate: '当前佣金比例',
-      directCustomers: '直属客户',
-      pending: '可提现佣金',
-      total: '累计佣金'
-    },
-    balance: {
-      title: '佣金余额',
-      description: '将待提现佣金转入账户余额后即可按现有余额使用。',
-      transfer: '转入余额',
-      success: '佣金已转入余额'
-    },
-    tabs: {
-      customers: '直属客户',
-      commissions: '佣金明细',
-      withdrawals: '提现申请'
-    },
-    customers: {
-      hint: '代理关系只有一层，这里不会展示客户的下级。',
-      customer: '客户',
-      usage: '消费金额',
-      requests: '请求数',
-      joinedAt: '绑定时间'
-    },
-    commissions: {
-      customer: '客户 ID',
-      model: '模型',
-      usage: '客户消费',
-      commission: '佣金',
-      createdAt: '时间'
-    },
-    withdrawals: {
-      amount: '提现金额',
-      paymentAccount: '收款账号',
-      note: '备注',
-      status: '状态',
-      createdAt: '申请时间',
-      submit: '提交提现申请',
-      success: '提现申请已提交'
-    },
-    status: {
-      pending: '待处理',
-      paid: '已支付',
-      rejected: '已拒绝',
-      unknown: '未知'
-    }
-  },
-
   // Redeem
   redeem: {
     title: '兑换码',
