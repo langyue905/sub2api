@@ -753,7 +753,7 @@ describe('admin UsageView model audit export', () => {
 		)
 
 		const headers = aoaToSheet.mock.calls[0][0][0]
-		expect(headers.slice(1, 4)).toEqual(['Account', 'API Key', 'Username'])
+		expect(headers.slice(1, 4)).toEqual(['Username', 'API Key', 'Account'])
 		expect(headers.slice(4, 8)).toEqual([
 			'Requested model',
 			'Sent upstream model',
@@ -761,7 +761,7 @@ describe('admin UsageView model audit export', () => {
 			'Upstream model mismatch',
 		])
 		const row = sheetAddAoa.mock.calls[0][1][0]
-		expect(row.slice(1, 4)).toEqual(['export-account', 'export-key', 'export-user'])
+		expect(row.slice(1, 4)).toEqual(['export-user', 'export-key', 'export-account'])
 		expect(row.slice(4, 8)).toEqual(['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'Yes'])
 		expect(saveAs).toHaveBeenCalledTimes(1)
 	})
