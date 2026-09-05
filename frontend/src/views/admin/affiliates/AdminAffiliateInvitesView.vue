@@ -1,21 +1,24 @@
 <template>
-  <section class="relative z-10 mb-4 mt-6 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
-    <div class="mb-3 text-sm font-medium text-gray-900 dark:text-gray-100">手动补绑定邀请关系</div>
-    <div class="flex flex-wrap items-end gap-3">
-      <label class="text-sm text-gray-600 dark:text-gray-300">
-        被邀请用户 ID
-        <input v-model.number="inviteeId" type="number" min="1" class="input mt-1 w-40" />
-      </label>
-      <label class="text-sm text-gray-600 dark:text-gray-300">
-        邀请人用户 ID
-        <input v-model.number="inviterId" type="number" min="1" class="input mt-1 w-40" />
-      </label>
-      <button class="btn btn-primary" :disabled="saving || !inviteeId || !inviterId" @click="bind">
-        {{ saving ? '绑定中...' : '绑定' }}
-      </button>
-    </div>
-  </section>
-  <AdminAffiliateRecordsTable type="invites" />
+  <AdminAffiliateRecordsTable type="invites">
+    <template #before-table>
+      <section class="mb-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+        <div class="mb-3 text-sm font-medium text-gray-900 dark:text-gray-100">手动补绑定邀请关系</div>
+        <div class="flex flex-wrap items-end gap-3">
+          <label class="text-sm text-gray-600 dark:text-gray-300">
+            被邀请用户 ID
+            <input v-model.number="inviteeId" type="number" min="1" class="input mt-1 w-40" />
+          </label>
+          <label class="text-sm text-gray-600 dark:text-gray-300">
+            邀请人用户 ID
+            <input v-model.number="inviterId" type="number" min="1" class="input mt-1 w-40" />
+          </label>
+          <button class="btn btn-primary" :disabled="saving || !inviteeId || !inviterId" @click="bind">
+            {{ saving ? '绑定中...' : '绑定' }}
+          </button>
+        </div>
+      </section>
+    </template>
+  </AdminAffiliateRecordsTable>
 </template>
 
 <script setup lang="ts">
