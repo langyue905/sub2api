@@ -144,6 +144,17 @@ export async function updateUserSettings(
   return data
 }
 
+export async function bindInviter(
+  userId: number,
+  inviterUserId: number,
+): Promise<{ user_id: number; inviter_user_id: number }> {
+  const { data } = await apiClient.post<{ user_id: number; inviter_user_id: number }>(
+    `/admin/affiliates/users/${userId}/inviter`,
+    { inviter_user_id: inviterUserId },
+  )
+  return data
+}
+
 export async function clearUserSettings(
   userId: number,
 ): Promise<{ user_id: number }> {
@@ -219,6 +230,7 @@ export const affiliatesAPI = {
   listUsers,
   lookupUsers,
   updateUserSettings,
+  bindInviter,
   clearUserSettings,
   batchSetRate,
   listInviteRecords,

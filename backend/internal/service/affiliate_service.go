@@ -98,6 +98,7 @@ type AffiliateRepository interface {
 	EnsureUserAffiliate(ctx context.Context, userID int64) (*AffiliateSummary, error)
 	GetAffiliateByCode(ctx context.Context, code string) (*AffiliateSummary, error)
 	BindInviter(ctx context.Context, userID, inviterID int64) (bool, error)
+	AdminBindInviter(ctx context.Context, userID, inviterID int64) error
 	AccrueQuota(ctx context.Context, inviterID, inviteeUserID int64, amount float64, freezeHours int, sourceOrderID *int64) (bool, error)
 	GetAccruedRebateFromInvitee(ctx context.Context, inviterID, inviteeUserID int64) (float64, error)
 	ThawFrozenQuota(ctx context.Context, userID int64) (float64, error)
@@ -518,6 +519,24 @@ func (s *AffiliateService) AdminUpdateUserAffCode(ctx context.Context, userID in
 		return ErrAffiliateCodeInvalid
 	}
 	return s.repo.UpdateUserAffCode(ctx, userID, code)
+}
+
+// AdminBindInviter manually attaches an existing user to an inviter without overwriting an existing relationship.
+func (s *AffiliateService) AdminBindInviter(ctx context.Context, userID, inviterID int64) error {
+	if userID <= 0 || inviterID <= 0 || userID == inviterID {
+		return infraerrors.BadRequest("INVALID_INVITER_BINDING", "invitee and inviter must be different valid users")
+	}
+	if s == nil || s.repo == nil {
+		return infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
+	}
+	bound, err := s.repo.BindInviter(ctx, userID, inviterID)
+	if err != nil {
+		return err
+	}
+	if !bound {
+		return ErrAffiliateAlreadyBound
+	}
+	return nil
 }
 
 // AdminResetUserAffCode 重置用户邀请码为系统随机码。
