@@ -914,6 +914,7 @@ export interface OpsErrorLog {
 
   user_id?: number | null
   user_email: string
+  user_username?: string
   api_key_id?: number | null
   // 关联 api_key 名称（后端 LEFT JOIN api_keys；软删保留 name，故已删 key 仍有原名）。
   api_key_name?: string

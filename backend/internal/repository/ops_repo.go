@@ -267,7 +267,8 @@ SELECT
   COALESCE(e.user_agent, ''),
   e.request_type,
   COALESCE(ak.name, ''),
-  ak.deleted_at
+  ak.deleted_at,
+  COALESCE(u.username, '')
 FROM ops_error_logs e
 LEFT JOIN accounts a ON e.account_id = a.id
 LEFT JOIN groups g ON e.group_id = g.id
@@ -302,6 +303,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 		var requestType sql.NullInt64
 		var apiKeyName string
 		var apiKeyDeletedAt sql.NullTime
+		var userUsername string
 		if err := rows.Scan(
 			&item.ID,
 			&item.CreatedAt,
@@ -338,6 +340,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			&requestType,
 			&apiKeyName,
 			&apiKeyDeletedAt,
+			&userUsername,
 		); err != nil {
 			return nil, err
 		}
@@ -360,6 +363,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			item.UserID = &v
 		}
 		item.UserEmail = userEmail
+		item.UserUsername = userUsername
 		if apiKeyID.Valid {
 			v := apiKeyID.Int64
 			item.APIKeyID = &v
@@ -449,7 +453,8 @@ SELECT
   e.time_to_first_token_ms,
   COALESCE(e.api_key_prefix, ''),
   COALESCE(ak.name, ''),
-  ak.deleted_at
+  ak.deleted_at,
+  COALESCE(u.username, '')
 FROM ops_error_logs e
 LEFT JOIN users u ON e.user_id = u.id
 LEFT JOIN accounts a ON e.account_id = a.id
@@ -476,6 +481,7 @@ LIMIT 1`
 	var requestType sql.NullInt64
 	var detailAPIKeyName string
 	var detailAPIKeyDeletedAt sql.NullTime
+	var detailUserUsername string
 
 	err := r.db.QueryRowContext(ctx, q, id).Scan(
 		&out.ID,
@@ -524,6 +530,7 @@ LIMIT 1`
 		&out.APIKeyPrefix,
 		&detailAPIKeyName,
 		&detailAPIKeyDeletedAt,
+		&detailUserUsername,
 	)
 	if err != nil {
 		return nil, err
@@ -588,6 +595,7 @@ LIMIT 1`
 	}
 	out.APIKeyName = detailAPIKeyName
 	out.APIKeyDeleted = detailAPIKeyDeletedAt.Valid
+	out.UserUsername = detailUserUsername
 
 	// Normalize upstream_errors to empty string when stored as JSON null.
 	out.UpstreamErrors = strings.TrimSpace(out.UpstreamErrors)

@@ -51,6 +51,7 @@ describe('OpsErrorLogTable user/api-key/account columns', () => {
     const wrapper = mountTable({
       user_id: 2,
       user_email: 'alice@test.com',
+      user_username: 'Alice',
       api_key_id: 5,
       api_key_name: 'my-key',
       account_id: 9,
@@ -58,7 +59,7 @@ describe('OpsErrorLogTable user/api-key/account columns', () => {
     })
 
     const text = wrapper.text()
-    expect(text).toContain('alice@test.com') // 用户列(上游行也显示用户)
+    expect(text).toContain('Alice') // 用户列显示用户名
     expect(text).toContain('my-key') // API Key 列
     expect(text).toContain('acct-A') // 账号列
   })

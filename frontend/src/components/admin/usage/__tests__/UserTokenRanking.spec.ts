@@ -22,6 +22,7 @@ vi.mock('vue-i18n', async () => {
 const item = (id: number, tokens: number) => ({
   user_id: id,
   email: `u${id}@test.com`,
+  username: `user-${id}`,
   requests: 1,
   input_tokens: tokens,
   output_tokens: 0,
@@ -62,6 +63,7 @@ describe('UserTokenRanking', () => {
 
     const rows = wrapper.findAll('tbody tr')
     expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('user-1')
 
     await rows[0].trigger('click')
     expect(wrapper.emitted('select-user')![0]).toEqual([1, 'u1@test.com'])
