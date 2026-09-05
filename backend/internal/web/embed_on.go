@@ -98,6 +98,11 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 		if cleanPath == "" {
 			cleanPath = "index.html"
 		}
+		// Embedded directory indexes (for example the image playground) must
+		// be resolved before falling back to the main SPA shell.
+		if strings.HasSuffix(cleanPath, "/") && s.fileExists(cleanPath+"index.html") {
+			cleanPath += "index.html"
+		}
 
 		// For index.html or SPA routes, serve with injected settings
 		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
@@ -319,6 +324,11 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 		cleanPath := strings.TrimPrefix(path, "/")
 		if cleanPath == "" {
 			cleanPath = "index.html"
+		}
+		if strings.HasSuffix(cleanPath, "/") {
+			if _, err := distFS.Open(cleanPath + "index.html"); err == nil {
+				cleanPath += "index.html"
+			}
 		}
 
 		if file, err := distFS.Open(cleanPath); err == nil {
