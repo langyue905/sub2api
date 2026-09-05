@@ -13,6 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
+import ImagePlaygroundView from '@/views/user/ImagePlaygroundView.vue'
 
 /**
  * Route definitions with lazy loading
@@ -230,8 +231,9 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/image-playground',
+    alias: '/image-playground/',
     name: 'ImagePlayground',
-    component: () => import('@/views/user/ImagePlaygroundView.vue'),
+    component: ImagePlaygroundView,
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
