@@ -498,6 +498,7 @@ export default {
       updating: '更新中...',
       columns: {
         user: '用户',
+        userEmail: '用户邮箱',
         id: 'ID',
         email: '邮箱',
         username: '用户名',

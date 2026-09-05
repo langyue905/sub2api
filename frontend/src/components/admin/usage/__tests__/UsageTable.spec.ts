@@ -774,4 +774,39 @@ describe('admin UsageTable deleted-user badge', () => {
     expect(wrapper.text()).not.toContain('Deleted')
     expect(wrapper.text()).toContain('active@test.com')
   })
+
+  it('prefers the username and falls back to email when it is empty', () => {
+    const rows = [
+      {
+        request_id: 'req-username-1',
+        user_id: 4,
+        user: { id: 4, username: '  display-name  ', email: 'name@test.com', deleted_at: null },
+      },
+      {
+        request_id: 'req-username-2',
+        user_id: 5,
+        user: { id: 5, username: '', email: 'fallback@test.com', deleted_at: null },
+      },
+    ]
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: rows,
+        loading: false,
+        columns: [{ key: 'user', label: 'Username' }],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStubWithUser,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('display-name')
+    expect(wrapper.text()).not.toContain('  display-name  ')
+    expect(wrapper.text()).toContain('fallback@test.com')
+  })
 })

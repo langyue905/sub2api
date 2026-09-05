@@ -244,6 +244,7 @@ type PendingOAuthCreateAccountResponse = {
 }
 
 const email = ref<string>('')
+const username = ref<string>('')
 const password = ref<string>('')
 const initialTurnstileToken = ref<string>('')
 const initialTencentCaptchaRandstr = ref<string>('')
@@ -332,6 +333,7 @@ onMounted(async () => {
     try {
       const registerData = JSON.parse(registerDataStr)
       email.value = registerData.email || ''
+      username.value = registerData.username || ''
       password.value = registerData.password || ''
       initialTurnstileToken.value =
         registerData.tencent_captcha_ticket || registerData.turnstile_token || ''
@@ -349,7 +351,15 @@ onMounted(async () => {
             adoptAvatar: registerData.pending_adoption_decision.adopt_avatar === true
           }
         : null
-      hasRegisterData.value = !!(email.value && password.value)
+      // OAuth pending registrations predate the local username requirement;
+      // ordinary email registrations must carry the new username field.
+      hasRegisterData.value = !!(
+        email.value &&
+        password.value &&
+        (Boolean(pendingProvider.value.trim()) ||
+          Boolean(pendingAuthToken.value.trim()) ||
+          Boolean(username.value.trim()))
+      )
     } catch {
       hasRegisterData.value = false
     }
@@ -720,6 +730,7 @@ async function handleVerify(): Promise<void> {
     } else {
       // Register with verification code
       await authStore.register({
+        username: username.value.trim(),
         email: email.value,
         password: password.value,
         verify_code: verifyCode.value.trim(),
@@ -783,8 +794,12 @@ function buildEmailSuffixNotAllowedMessage(): string {
 }
 
 function buildRegistrationErrorMessage(error: unknown, fallback: string): string {
-  if (extractApiErrorCode(error) === 'EMAIL_DOMAIN_REGISTRATION_LIMIT') {
+  const code = extractApiErrorCode(error)
+  if (code === 'EMAIL_DOMAIN_REGISTRATION_LIMIT') {
     return t('auth.emailDomainRegistrationLimit')
+  }
+  if (code === 'USERNAME_EXISTS' || code === 'USERNAME_INVALID' || code === 'USERNAME_REQUIRED') {
+    return t(`auth.errors.${code}`)
   }
   return buildAuthErrorMessage(error, { fallback })
 }

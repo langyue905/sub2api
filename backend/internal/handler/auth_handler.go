@@ -48,6 +48,7 @@ func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userSe
 
 // RegisterRequest represents the registration request payload
 type RegisterRequest struct {
+	Username              string `json:"username" binding:"required"`
 	Email                 string `json:"email" binding:"required,email"`
 	Password              string `json:"password" binding:"required,min=6"`
 	VerifyCode            string `json:"verify_code"`
@@ -75,7 +76,10 @@ type SendVerifyCodeResponse struct {
 
 // LoginRequest represents the login request payload
 type LoginRequest struct {
-	Email                 string `json:"email" binding:"required,email"`
+	// Identifier is the preferred field for new clients. Email is retained as
+	// the legacy JSON field and may contain either an email or a username.
+	Identifier            string `json:"identifier"`
+	Email                 string `json:"email"`
 	Password              string `json:"password" binding:"required"`
 	TurnstileToken        string `json:"turnstile_token"`
 	TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
@@ -190,10 +194,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	_, user, err := h.authService.RegisterWithVerification(
+	_, user, err := h.authService.RegisterWithUsernameAndVerification(
 		c.Request.Context(),
 		req.Email,
 		req.Password,
+		req.Username,
 		req.VerifyCode,
 		req.PromoCode,
 		req.InvitationCode,
@@ -242,6 +247,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	identifier := strings.TrimSpace(req.Identifier)
+	if identifier == "" {
+		identifier = strings.TrimSpace(req.Email)
+	}
+	if identifier == "" {
+		response.BadRequest(c, "Invalid request: username or email is required")
+		return
+	}
 
 	proof := captchaProof(req.TurnstileToken, req.TencentCaptchaTicket, req.TencentCaptchaRandstr)
 	if err := h.authService.VerifyCaptcha(c.Request.Context(), proof, ip.GetClientIP(c)); err != nil {
@@ -249,7 +262,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	token, user, err := h.authService.Login(c.Request.Context(), req.Email, req.Password)
+	token, user, err := h.authService.Login(c.Request.Context(), identifier, req.Password)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

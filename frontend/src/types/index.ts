@@ -115,7 +115,10 @@ export interface AdminUser extends User {
 }
 
 export interface LoginRequest {
+  /** Legacy JSON field; the backend accepts either an email or a username here. */
   email: string
+  /** Optional explicit identifier field for new API clients. */
+  identifier?: string
   password: string
   turnstile_token?: string
   tencent_captcha_ticket?: string
@@ -134,6 +137,8 @@ export interface ActionCaptchaRequestProof extends Partial<TencentCaptchaRequest
 }
 
 export interface RegisterRequest {
+  /** Required for ordinary email/password registration. */
+  username: string
   email: string
   password: string
   verify_code?: string

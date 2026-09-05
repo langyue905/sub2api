@@ -122,6 +122,55 @@ func TestUserRepositoryUpdateRejectsNormalizedEmailDuplicate(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrEmailExists)
 }
 
+func TestUserRepositoryGetByUsernameNormalizesTrimAndCase(t *testing.T) {
+	repo, _ := newUserEntRepo(t)
+	ctx := context.Background()
+
+	user := &service.User{
+		Email:        "username-lookup@example.com",
+		Username:     " MixedUser ",
+		PasswordHash: "hash",
+		Role:         service.RoleUser,
+		Status:       service.StatusActive,
+	}
+	require.NoError(t, repo.Create(ctx, user))
+
+	got, err := repo.GetByUsername(ctx, "  mixeduser  ")
+	require.NoError(t, err)
+	require.Equal(t, user.ID, got.ID)
+	require.Equal(t, " MixedUser ", got.Username)
+}
+
+func TestUserRepositoryUpdateRejectsNormalizedUsernameDuplicate(t *testing.T) {
+	repo, _ := newUserEntRepo(t)
+	ctx := context.Background()
+
+	first := &service.User{
+		Email:        "username-first@example.com",
+		Username:     "FirstUser",
+		PasswordHash: "hash",
+		Role:         service.RoleUser,
+		Status:       service.StatusActive,
+	}
+	second := &service.User{
+		Email:        "username-second@example.com",
+		Username:     "SecondUser",
+		PasswordHash: "hash",
+		Role:         service.RoleUser,
+		Status:       service.StatusActive,
+	}
+	require.NoError(t, repo.Create(ctx, first))
+	require.NoError(t, repo.Create(ctx, second))
+
+	second.Username = " firstuser "
+	err := repo.Update(ctx, second, service.UserUpdateFields{Username: true})
+	require.ErrorIs(t, err, service.ErrUsernameExists)
+
+	stored, err := repo.GetByID(ctx, second.ID)
+	require.NoError(t, err)
+	require.Equal(t, "SecondUser", stored.Username)
+}
+
 func TestUserRepositoryGetByEmailReportsNormalizedEmailConflict(t *testing.T) {
 	repo, client := newUserEntRepo(t)
 	ctx := context.Background()

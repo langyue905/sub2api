@@ -101,6 +101,9 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 	if guardEmailAlias {
 		// 别名变体的字面量不同，唯一索引无法兜底；用收件箱身份锁把同一收件箱的并发注册串行化。
 		lockKeys = append(lockKeys, emailAliasUniquenessLockKey(userIn.Email))
+		// 普通注册还需要在同一事务内串行化用户名查重，避免两个并发
+		// 注册请求同时通过服务层预检查而写入重复用户名。
+		lockKeys = append(lockKeys, usernameUniquenessLockKey(userIn.Username))
 	}
 	if domainLimit != "" {
 		lockKeys = append(lockKeys, registrationEmailDomainLockKey(domainLimit))
@@ -137,6 +140,9 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		}
 		if aliasExists {
 			return service.ErrEmailExists
+		}
+		if err := ensureNormalizedUsernameAvailableWithClient(txCtx, txClient, 0, userIn.Username); err != nil {
+			return err
 		}
 	}
 
@@ -237,6 +243,46 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*service
 	return out, nil
 }
 
+// GetByUsername resolves a local username using the same trim/case-insensitive
+// semantics as registration availability checks. Empty usernames are never
+// treated as a login identity, and ambiguous legacy rows are rejected instead
+// of selecting an arbitrary account.
+func (r *userRepository) GetByUsername(ctx context.Context, username string) (*service.User, error) {
+	if strings.TrimSpace(username) == "" {
+		return nil, service.ErrUserNotFound
+	}
+	matches, err := r.client.User.Query().
+		Where(userUsernameLookupPredicate(username)).
+		Order(dbent.Asc(dbuser.FieldID)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(matches) == 0 {
+		return nil, service.ErrUserNotFound
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("normalized username lookup matched multiple users for %q", service.NormalizeUsername(username))
+	}
+	m := matches[0]
+	out := userEntityToService(m)
+	groups, err := r.loadAllowedGroups(ctx, []int64{m.ID})
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := groups[m.ID]; ok {
+		out.AllowedGroups = v
+	}
+	return out, nil
+}
+
+func (r *userRepository) ExistsByUsername(ctx context.Context, username string) (bool, error) {
+	if strings.TrimSpace(username) == "" {
+		return false, nil
+	}
+	return r.client.User.Query().Where(userUsernameLookupPredicate(username)).Exist(ctx)
+}
+
 func (r *userRepository) Update(ctx context.Context, userIn *service.User, fields service.UserUpdateFields) error {
 	if userIn == nil {
 		return nil
@@ -267,21 +313,37 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 		}
 	}
 
-	// 邮箱唯一性锁与查重只在本次确实要改邮箱时才做：不改邮箱的更新既不需要
-	// 串行化，也不该因为快照里的旧邮箱已被他人占用而报 ErrEmailExists。
+	// 邮箱/用户名唯一性锁与查重只在本次确实要改对应字段时才做：不改字段的
+	// 更新既不需要串行化，也不应因为快照里的旧值已被他人占用而失败。一次性
+	// 获取所有锁，并由 lockRepositoryScopedKeys 排序，避免同时修改邮箱和用户名
+	// 的请求以不同顺序拿锁造成死锁。
+	identityLockKeys := make([]string, 0, 2)
 	if fields.Email {
-		releaseEmailLock, err := lockRepositoryScopedKeys(
+		identityLockKeys = append(identityLockKeys, normalizedEmailUniquenessLockKey(userIn.Email))
+	}
+	if fields.Username {
+		identityLockKeys = append(identityLockKeys, usernameUniquenessLockKey(userIn.Username))
+	}
+	if len(identityLockKeys) > 0 {
+		releaseIdentityLocks, err := lockRepositoryScopedKeys(
 			txCtx,
 			txClient,
 			txAwareSQLExecutor(txCtx, r.sql, r.client),
-			normalizedEmailUniquenessLockKey(userIn.Email),
+			identityLockKeys...,
 		)
 		if err != nil {
 			return err
 		}
-		defer releaseEmailLock()
+		defer releaseIdentityLocks()
+	}
 
+	if fields.Email {
 		if err := ensureNormalizedEmailAvailableWithClient(txCtx, txClient, userIn.ID, userIn.Email); err != nil {
+			return err
+		}
+	}
+	if fields.Username {
+		if err := ensureNormalizedUsernameAvailableWithClient(txCtx, txClient, userIn.ID, userIn.Username); err != nil {
 			return err
 		}
 	}
@@ -297,7 +359,7 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 		updateOp = updateOp.SetEmail(userIn.Email)
 	}
 	if fields.Username {
-		updateOp = updateOp.SetUsername(userIn.Username)
+		updateOp = updateOp.SetUsername(service.NormalizeUsername(userIn.Username))
 	}
 	if fields.Notes {
 		updateOp = updateOp.SetNotes(userIn.Notes)
@@ -343,6 +405,11 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 	updated, err := updateOp.Save(txCtx)
 	if err != nil {
+		// Keep both conflict mappings here: a future database constraint may
+		// enforce either identity independently of the application-level check.
+		if fields.Username && !fields.Email && isUniqueConstraintViolation(err) {
+			return service.ErrUsernameExists.WithCause(err)
+		}
 		return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
 	}
 
@@ -1307,6 +1374,26 @@ func ensureNormalizedEmailAvailableWithClient(ctx context.Context, client *dbent
 	return nil
 }
 
+func ensureNormalizedUsernameAvailableWithClient(ctx context.Context, client *dbent.Client, userID int64, username string) error {
+	client = clientFromContext(ctx, client)
+	if client == nil || strings.TrimSpace(username) == "" {
+		return nil
+	}
+
+	matches, err := client.User.Query().
+		Where(userUsernameLookupPredicate(username)).
+		All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, match := range matches {
+		if match.ID != userID {
+			return service.ErrUsernameExists
+		}
+	}
+	return nil
+}
+
 func userEmailLookupPredicate(email string) predicate.User {
 	normalized := normalizeEmailLookupValue(email)
 	if normalized == "" {
@@ -1316,6 +1403,21 @@ func userEmailLookupPredicate(email string) predicate.User {
 		s.Where(entsql.P(func(b *entsql.Builder) {
 			b.WriteString("LOWER(TRIM(").
 				Ident(s.C(dbuser.FieldEmail)).
+				WriteString(")) = ").
+				Arg(normalized)
+		}))
+	})
+}
+
+func userUsernameLookupPredicate(username string) predicate.User {
+	normalized := strings.ToLower(service.NormalizeUsername(username))
+	if normalized == "" {
+		return dbuser.UsernameEQ(username)
+	}
+	return predicate.User(func(s *entsql.Selector) {
+		s.Where(entsql.P(func(b *entsql.Builder) {
+			b.WriteString("LOWER(TRIM(").
+				Ident(s.C(dbuser.FieldUsername)).
 				WriteString(")) = ").
 				Arg(normalized)
 		}))
@@ -1332,6 +1434,14 @@ func normalizedEmailUniquenessLockKey(email string) string {
 		return ""
 	}
 	return "users:normalized-email:" + normalized
+}
+
+func usernameUniquenessLockKey(username string) string {
+	normalized := strings.ToLower(service.NormalizeUsername(username))
+	if normalized == "" {
+		return ""
+	}
+	return "users:normalized-username:" + normalized
 }
 
 func registrationEmailDomainLockKey(domain string) string {

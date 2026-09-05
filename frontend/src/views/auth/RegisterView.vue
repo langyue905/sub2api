@@ -28,6 +28,30 @@
 
       <!-- Registration Form -->
       <form v-else @submit.prevent="handleRegister" class="space-y-5">
+        <!-- Username Input -->
+        <div>
+          <label for="username" class="input-label">
+            {{ t('auth.usernameLabel') }}
+          </label>
+          <div class="relative">
+            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
+              <Icon name="user" size="md" class="text-gray-400 dark:text-dark-500" />
+            </div>
+            <input
+              id="username"
+              v-model="formData.username"
+              type="text"
+              required
+              autofocus
+              autocomplete="username"
+              :disabled="registrationActionDisabled"
+              class="input pl-11"
+              :class="{ 'input-error': errors.username }"
+              :placeholder="t('auth.usernamePlaceholder')"
+            />
+          </div>
+        </div>
+
         <!-- Email Input -->
         <div>
           <label for="email" class="input-label">
@@ -42,7 +66,6 @@
               v-model="formData.email"
               type="email"
               required
-              autofocus
               autocomplete="email"
               :disabled="registrationActionDisabled"
               class="input pl-11"
@@ -459,6 +482,7 @@ const invitationValidation = reactive({
 let invitationValidateTimeout: ReturnType<typeof setTimeout> | null = null
 
 const formData = reactive({
+  username: '',
   email: '',
   password: '',
   promo_code: '',
@@ -467,6 +491,7 @@ const formData = reactive({
 })
 
 const errors = reactive({
+  username: '',
   email: '',
   password: '',
   turnstile: '',
@@ -474,6 +499,7 @@ const errors = reactive({
 })
 
 const validationToastMessage = computed(() =>
+  errors.username ||
   errors.email ||
   errors.password ||
   (invitationValidation.invalid ? invitationValidation.message : '') ||
@@ -882,6 +908,7 @@ function buildEmailSuffixNotAllowedMessage(): string {
 
 function validateForm(): boolean {
   // Reset errors
+  errors.username = ''
   errors.email = ''
   errors.password = ''
   errors.turnstile = ''
@@ -895,6 +922,22 @@ function validateForm(): boolean {
       showAgreementModal.value = true
     }
     return false
+  }
+
+  // Username validation
+  const username = formData.username.trim()
+  if (!username) {
+    errors.username = t('auth.usernameRequired')
+    isValid = false
+  } else if (
+    Array.from(username).length > 100 ||
+    Array.from(username).some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0
+      return character === '@' || /\s/u.test(character) || codePoint < 0x20 || codePoint === 0x7f
+    })
+  ) {
+    errors.username = t('auth.invalidUsername')
+    isValid = false
   }
 
   // Email validation
@@ -1007,6 +1050,7 @@ async function handleRegister(): Promise<void> {
         'register_data',
         JSON.stringify({
           email: formData.email,
+          username: formData.username.trim(),
           password: formData.password,
           turnstile_token:
             turnstileEnabled.value || aliyunCaptchaEnabled.value ? turnstileToken.value : undefined,
@@ -1025,6 +1069,7 @@ async function handleRegister(): Promise<void> {
 
     // Otherwise, directly register
     await authStore.register({
+      username: formData.username.trim(),
       email: formData.email,
       password: formData.password,
       turnstile_token:
@@ -1057,8 +1102,12 @@ async function handleRegister(): Promise<void> {
 }
 
 function buildRegistrationErrorMessage(error: unknown, fallback: string): string {
-  if (extractApiErrorCode(error) === 'EMAIL_DOMAIN_REGISTRATION_LIMIT') {
+  const code = extractApiErrorCode(error)
+  if (code === 'EMAIL_DOMAIN_REGISTRATION_LIMIT') {
     return t('auth.emailDomainRegistrationLimit')
+  }
+  if (code === 'USERNAME_EXISTS' || code === 'USERNAME_INVALID' || code === 'USERNAME_REQUIRED') {
+    return t(`auth.errors.${code}`)
   }
   return buildAuthErrorMessage(error, { fallback })
 }
