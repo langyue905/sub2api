@@ -1,5 +1,5 @@
 <template>
-  <section class="mb-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+  <section class="relative z-10 mb-4 mt-6 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
     <div class="mb-3 text-sm font-medium text-gray-900 dark:text-gray-100">手动补绑定邀请关系</div>
     <div class="flex flex-wrap items-end gap-3">
       <label class="text-sm text-gray-600 dark:text-gray-300">
