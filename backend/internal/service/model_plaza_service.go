@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// PlazaOfficialPricing 模型广场展示用的官方参考价（USD per token），与计费同源：
-// LiteLLM → 内置兜底价卡 → 模型策略。字段为 nil 表示该项缺失（0 视为未配置）。
+// PlazaOfficialPricing 模型广场右侧展示的价格基准（按每 token 存储，前端按 1M 展示）。
+// 目前来源是渠道里配置的价格；字段为 nil 表示该项未配置。
 type PlazaOfficialPricing struct {
 	InputPrice        *float64
 	OutputPrice       *float64
@@ -19,7 +19,7 @@ type PlazaOfficialPricing struct {
 	Intervals []PricingInterval
 }
 
-// PlazaModel 模型广场中单个模型条目：按实收口径合成的展示定价 + 官方参考价。
+// PlazaModel 模型广场中单个模型条目：按实收口径合成的展示定价 + 渠道设置价。
 type PlazaModel struct {
 	Name            string
 	Platform        string
@@ -94,7 +94,7 @@ func NewModelPlazaService(
 //   - 同分组同名模型「先见者胜」，仅当已存条目无定价而新条目有定价时升级替换；
 //   - token 模型的单价与阶梯按实收口径合成（见 ResolveContextPricingSchedule），
 //     图片计费模型的档位价按实收口径合成（见 plazaImageDisplayPricing）；
-//   - 每个模型附带官方参考价（查不到为 nil）；
+//   - 每个模型附带渠道设置价（未配置为 nil）；
 //   - 只返回 Models 非空的分组；分组按 RateMultiplier 升序（同倍率按名称），
 //     组内模型按名称排序。
 //
@@ -190,7 +190,6 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 		}
 	}
 
-	officialMemo := make(map[string]*PlazaOfficialPricing)
 	out := make([]PlazaGroup, 0, len(order))
 	for _, gid := range order {
 		pg := byGroup[gid]
@@ -205,8 +204,10 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 		})
 		g := groupEnt[gid]
 		for j := range pg.Models {
+			configuredPricing := plazaConfiguredPricing(pg.Models[j].Pricing)
 			s.fillDisplayPricing(ctx, &pg.Models[j], g)
-			pg.Models[j].OfficialPricing = s.lookupOfficialPricing(ctx, pg.Models[j].Name, officialMemo)
+			// 右侧列展示管理员在渠道里填写的基准价；左侧再按分组/用户倍率展示实付价。
+			pg.Models[j].OfficialPricing = configuredPricing
 		}
 		out = append(out, *pg)
 	}
@@ -218,6 +219,45 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 		return out[i].Name < out[j].Name
 	})
 	return out, nil
+}
+
+// plazaConfiguredPricing 将渠道配置的价格转换成模型广场右侧使用的 DTO。
+// 这里保留原始数值（包括显式配置的 0），不套用分组倍率，也不读取内置官方价卡。
+func plazaConfiguredPricing(p *ChannelModelPricing) *PlazaOfficialPricing {
+	if p == nil {
+		return nil
+	}
+	out := &PlazaOfficialPricing{
+		InputPrice:      p.InputPrice,
+		OutputPrice:     p.OutputPrice,
+		CacheWritePrice: p.CacheWritePrice,
+		CacheReadPrice:  p.CacheReadPrice,
+	}
+	if len(p.Intervals) > 0 {
+		out.Intervals = make([]PricingInterval, 0, len(p.Intervals))
+		for i := range p.Intervals {
+			iv := p.Intervals[i]
+			// 右侧三列是 token 单价；按次/图片阶梯沿用原有空白展示。
+			if iv.InputPrice == nil && iv.OutputPrice == nil && iv.CacheWritePrice == nil && iv.CacheReadPrice == nil {
+				continue
+			}
+			out.Intervals = append(out.Intervals, PricingInterval{
+				MinTokens:       iv.MinTokens,
+				MaxTokens:       iv.MaxTokens,
+				TierLabel:       iv.TierLabel,
+				InputPrice:      iv.InputPrice,
+				OutputPrice:     iv.OutputPrice,
+				CacheWritePrice: iv.CacheWritePrice,
+				CacheReadPrice:  iv.CacheReadPrice,
+				SortOrder:       iv.SortOrder,
+			})
+		}
+	}
+	if out.InputPrice == nil && out.OutputPrice == nil && out.CacheWritePrice == nil &&
+		out.CacheReadPrice == nil && len(out.Intervals) == 0 {
+		return nil
+	}
+	return out
 }
 
 // fillDisplayPricing 把模型的展示定价换成实收口径：
@@ -324,41 +364,4 @@ func plazaImageDisplayPricing(p *ChannelModelPricing, g *Group) *ChannelModelPri
 		})
 	}
 	return &clone
-}
-
-// lookupOfficialPricing 查询模型的官方参考价（与计费同源：LiteLLM → 内置兜底 → 模型策略），
-// 带 memo 避免同名模型重复解析。官方阶梯按无分组、无渠道的口径查阶梯表。
-// billingService 为 nil（测试场景）或查不到时返回 nil。
-func (s *ModelPlazaService) lookupOfficialPricing(ctx context.Context, modelName string, memo map[string]*PlazaOfficialPricing) *PlazaOfficialPricing {
-	if s.billingService == nil {
-		return nil
-	}
-	if cached, ok := memo[modelName]; ok {
-		return cached
-	}
-	var result *PlazaOfficialPricing
-	if mp, err := s.billingService.GetModelPricing(modelName); err == nil && mp != nil {
-		result = &PlazaOfficialPricing{
-			InputPrice:      nonZeroPtr(mp.InputPricePerToken),
-			OutputPrice:     nonZeroPtr(mp.OutputPricePerToken),
-			CacheWritePrice: nonZeroPtr(mp.CacheCreationPricePerToken),
-			CacheReadPrice:  nonZeroPtr(mp.CacheReadPricePerToken),
-		}
-		// 计费只在支持 5m/1h 分档时使用 1h 价，其余情况 1h 价对用户无意义。
-		if mp.SupportsCacheBreakdown {
-			result.CacheWrite1hPrice = nonZeroPtr(mp.CacheCreation1hPrice)
-		}
-		if s.resolver != nil {
-			sched, schedErr := s.billingService.ResolveContextPricingSchedule(ctx, s.resolver, ContextPricingScheduleInput{Model: modelName})
-			if schedErr == nil && sched != nil && len(sched.Tiers) > 1 {
-				result.Intervals = plazaIntervalsFromTiers(sched.Tiers)
-			}
-		}
-		if result.InputPrice == nil && result.OutputPrice == nil && result.CacheWritePrice == nil &&
-			result.CacheWrite1hPrice == nil && result.CacheReadPrice == nil && len(result.Intervals) == 0 {
-			result = nil
-		}
-	}
-	memo[modelName] = result
-	return result
 }
