@@ -28,7 +28,9 @@ type PlazaModel struct {
 	// LongContextBasis 多档时的计价基准（整单 / 仅超出部分），单档为空。
 	LongContextBasis ContextPricingBasis
 	// TimePricing 计费会生效的分时倍率时段；无分时为 nil。
-	TimePricing *TimePricingSchedule
+	TimePricing       *TimePricingSchedule
+	pricingDeclared   bool
+	configuredPricing *PlazaOfficialPricing
 }
 
 // PlazaGroup 模型广场中以分组为顶层的条目。
@@ -151,6 +153,12 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 		}
 		ch.normalizeBillingModelSource()
 		supported := ch.SupportedModels()
+		pricingDeclared := make([]bool, len(supported))
+		configuredPricing := make([]*PlazaOfficialPricing, len(supported))
+		for j := range supported {
+			pricingDeclared[j] = supported[j].Pricing != nil
+			configuredPricing[j] = plazaConfiguredPricing(supported[j].Pricing)
+		}
 		fillGlobalPricingFallback(s.pricingService, supported)
 
 		for _, gid := range ch.GroupIDs {
@@ -177,19 +185,24 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 					// 先见者胜；仅当已存条目无定价而新条目有定价时升级。
 					if pg.Models[at].Pricing == nil && m.Pricing != nil {
 						pg.Models[at].Pricing = m.Pricing
+						pg.Models[at].pricingDeclared = pricingDeclared[j]
+						pg.Models[at].configuredPricing = configuredPricing[j]
 					}
 					continue
 				}
 				idx[key] = len(pg.Models)
 				pg.Models = append(pg.Models, PlazaModel{
-					Name:     m.Name,
-					Platform: m.Platform,
-					Pricing:  m.Pricing,
+					Name:              m.Name,
+					Platform:          m.Platform,
+					Pricing:           m.Pricing,
+					pricingDeclared:   pricingDeclared[j],
+					configuredPricing: configuredPricing[j],
 				})
 			}
 		}
 	}
 
+	officialMemo := make(map[string]*PlazaOfficialPricing)
 	out := make([]PlazaGroup, 0, len(order))
 	for _, gid := range order {
 		pg := byGroup[gid]
@@ -204,10 +217,13 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 		})
 		g := groupEnt[gid]
 		for j := range pg.Models {
-			configuredPricing := plazaConfiguredPricing(pg.Models[j].Pricing)
 			s.fillDisplayPricing(ctx, &pg.Models[j], g)
-			// 右侧列展示管理员在渠道里填写的基准价；左侧再按分组/用户倍率展示实付价。
-			pg.Models[j].OfficialPricing = configuredPricing
+			// 明确定价的渠道展示管理员填写值；纯模型映射继续展示目录参考价。
+			if pg.Models[j].pricingDeclared {
+				pg.Models[j].OfficialPricing = pg.Models[j].configuredPricing
+			} else {
+				pg.Models[j].OfficialPricing = s.lookupOfficialPricing(ctx, pg.Models[j].Name, officialMemo)
+			}
 		}
 		out = append(out, *pg)
 	}
@@ -364,4 +380,39 @@ func plazaImageDisplayPricing(p *ChannelModelPricing, g *Group) *ChannelModelPri
 		})
 	}
 	return &clone
+}
+
+// lookupOfficialPricing 查询模型目录参考价。它仅用于渠道没有声明定价条目的纯模型映射，
+// 避免覆盖管理员已经填写（或明确留空）的渠道价格。
+func (s *ModelPlazaService) lookupOfficialPricing(ctx context.Context, modelName string, memo map[string]*PlazaOfficialPricing) *PlazaOfficialPricing {
+	if s.billingService == nil {
+		return nil
+	}
+	if cached, ok := memo[modelName]; ok {
+		return cached
+	}
+	var result *PlazaOfficialPricing
+	if mp, err := s.billingService.GetModelPricing(modelName); err == nil && mp != nil {
+		result = &PlazaOfficialPricing{
+			InputPrice:      nonZeroPtr(mp.InputPricePerToken),
+			OutputPrice:     nonZeroPtr(mp.OutputPricePerToken),
+			CacheWritePrice: nonZeroPtr(mp.CacheCreationPricePerToken),
+			CacheReadPrice:  nonZeroPtr(mp.CacheReadPricePerToken),
+		}
+		if mp.SupportsCacheBreakdown {
+			result.CacheWrite1hPrice = nonZeroPtr(mp.CacheCreation1hPrice)
+		}
+		if s.resolver != nil {
+			sched, schedErr := s.billingService.ResolveContextPricingSchedule(ctx, s.resolver, ContextPricingScheduleInput{Model: modelName})
+			if schedErr == nil && sched != nil && len(sched.Tiers) > 1 {
+				result.Intervals = plazaIntervalsFromTiers(sched.Tiers)
+			}
+		}
+		if result.InputPrice == nil && result.OutputPrice == nil && result.CacheWritePrice == nil &&
+			result.CacheWrite1hPrice == nil && result.CacheReadPrice == nil && len(result.Intervals) == 0 {
+			result = nil
+		}
+	}
+	memo[modelName] = result
+	return result
 }
