@@ -154,9 +154,12 @@ func TestListPlazaGroups_CompositeAndOrdinaryGroupsDoNotLeakPlatforms(t *testing
 		byName[group.Name] = group
 	}
 	require.Len(t, byName["anthropic-only"].Models, 1)
-	require.Equal(t, []PlazaModel{{
-		Name: "claude-sonnet", Platform: PlatformAnthropic, Pricing: byName["anthropic-only"].Models[0].Pricing,
-	}}, byName["anthropic-only"].Models)
+	model := byName["anthropic-only"].Models[0]
+	require.Equal(t, "claude-sonnet", model.Name)
+	require.Equal(t, PlatformAnthropic, model.Platform)
+	require.Same(t, byName["anthropic-only"].Models[0].Pricing, model.Pricing)
+	require.NotNil(t, model.OfficialPricing)
+	require.InDelta(t, 3e-6, *model.OfficialPricing.InputPrice, 1e-15)
 	require.Len(t, byName["composite"].Models, 2)
 	require.Equal(t, []string{"claude-sonnet", "gpt-5"}, []string{
 		byName["composite"].Models[0].Name,
@@ -196,7 +199,7 @@ func TestListPlazaGroups_SortedByRateMultiplierAsc(t *testing.T) {
 	require.Equal(t, "b-standard", out[2].Name)
 }
 
-func TestListPlazaGroups_OfficialPricingFill(t *testing.T) {
+func TestListPlazaGroups_ConfiguredPricingFill(t *testing.T) {
 	pricingSvc := newStubPricingServiceFromMap(map[string]*LiteLLMModelPricing{
 		"claude-sonnet": {
 			Mode:                                "chat",
@@ -213,7 +216,7 @@ func TestListPlazaGroups_OfficialPricingFill(t *testing.T) {
 	}
 	groups := []Group{{ID: 10, Name: "g", Platform: "anthropic", RateMultiplier: 1}}
 	svc := newPlazaService(channels, groups, pricingSvc)
-	// 官方价与计费同源：需要计费服务与解析器（官方参考不查渠道，解析器无需渠道服务）。
+	// 右侧价格来自渠道填写值，不读取目录官方价。
 	svc.billingService = NewBillingService(&config.Config{}, pricingSvc)
 	svc.resolver = NewModelPricingResolver(nil, svc.billingService)
 	out, err := svc.ListGroups(context.Background())
@@ -225,16 +228,29 @@ func TestListPlazaGroups_OfficialPricingFill(t *testing.T) {
 	for _, m := range out[0].Models {
 		byName[m.Name] = m
 	}
-	// 命中:填充完整官方价(含 1h 缓存写入)
-	official := byName["claude-sonnet"].OfficialPricing
-	require.NotNil(t, official)
-	require.InDelta(t, 3e-6, *official.InputPrice, 1e-12)
-	require.InDelta(t, 6e-6, *official.CacheWrite1hPrice, 1e-12)
-	require.InDelta(t, 3e-7, *official.CacheReadPrice, 1e-12)
-	// 未命中:nil(GetModelPricing 的 claude 系列模糊匹配对非 claude 名不生效)
-	require.Nil(t, byName["unknown-model"].OfficialPricing)
-	// TokenPricingAbsent 条目不作为官方 token 价展示
-	require.Nil(t, byName["token-absent"].OfficialPricing)
+	for _, name := range []string{"claude-sonnet", "unknown-model", "token-absent"} {
+		configured := byName[name].OfficialPricing
+		require.NotNil(t, configured)
+		require.InDelta(t, 3e-6, *configured.InputPrice, 1e-12)
+		require.InDelta(t, 1.5e-5, *configured.OutputPrice, 1e-12)
+	}
+}
+
+func TestListPlazaGroups_ConfiguredPricingUsesChannelValue(t *testing.T) {
+	channels := []Channel{
+		plazaPricedChannel(1, "zhipu", []int64{10}, PlatformZhipu, "glm-5.3"),
+	}
+	groups := []Group{{ID: 10, Name: "zhipu", Platform: PlatformZhipu, RateMultiplier: 1}}
+	svc := newPlazaServiceWithBilling(channels, groups, map[int64]string{10: PlatformZhipu}, nil)
+
+	out, err := svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Models, 1)
+	configured := out[0].Models[0].OfficialPricing
+	require.NotNil(t, configured)
+	require.InDelta(t, 3e-6, *configured.InputPrice, 1e-15)
+	require.InDelta(t, 1.5e-5, *configured.OutputPrice, 1e-15)
 }
 
 func TestListPlazaGroups_GroupImagePriceOverridesChannelPricing(t *testing.T) {
@@ -353,7 +369,7 @@ func plazaModelsByName(models []PlazaModel) map[string]PlazaModel {
 }
 
 func TestListGroups_TokenLadderFollowsGroupToggle(t *testing.T) {
-	// 同一渠道挂开启/关闭阶梯的两个分组：实付档位随分组开关，官方阶梯不受影响。
+	// 同一渠道挂开启/关闭阶梯的两个分组：实付档位随分组开关；右侧展示渠道原始设置价。
 	channels := []Channel{{
 		ID: 1, Name: "ch", Status: StatusActive, GroupIDs: []int64{10, 20},
 		ModelPricing: []ChannelModelPricing{{Platform: PlatformOpenAI, Models: []string{"gpt-5.4"}, BillingMode: BillingModeToken}},
@@ -388,10 +404,7 @@ func TestListGroups_TokenLadderFollowsGroupToggle(t *testing.T) {
 	require.InDelta(t, 2.5e-6, *offModel.Pricing.InputPrice, 1e-15)
 
 	for _, m := range []PlazaModel{onModel, offModel} {
-		require.NotNil(t, m.OfficialPricing)
-		require.Len(t, m.OfficialPricing.Intervals, 2, "官方阶梯不受分组开关影响")
-		require.InDelta(t, 5e-6, *m.OfficialPricing.Intervals[1].InputPrice, 1e-15)
-		require.InDelta(t, 2.5e-6, *m.OfficialPricing.InputPrice, 1e-15)
+		require.Nil(t, m.OfficialPricing, "渠道未填写基准价时右侧保持为空")
 	}
 }
 
@@ -456,7 +469,7 @@ func TestListGroups_ImageModelKeepsTierSynthesisWithBilling(t *testing.T) {
 }
 
 func TestListGroups_CatalogMissingStillShowsChannelFlatPricing(t *testing.T) {
-	// 目录查不到的模型：计费按渠道平价（未配置项 $0），广场单档展示渠道平价，官方价为空。
+	// 目录查不到的模型：计费按渠道平价（未配置项 $0），广场单档展示渠道平价。
 	channels := []Channel{plazaPricedChannel(1, "ch", []int64{10}, PlatformAnthropic, "unknown-model-xyz")}
 	groups := []Group{{ID: 10, Name: "g", Platform: PlatformAnthropic, RateMultiplier: 1, LongContextPricingEnabled: true}}
 	svc := newPlazaServiceWithBilling(channels, groups, map[int64]string{10: PlatformAnthropic}, nil)
@@ -467,7 +480,8 @@ func TestListGroups_CatalogMissingStillShowsChannelFlatPricing(t *testing.T) {
 	require.InDelta(t, 3e-6, *m.Pricing.InputPrice, 1e-15)
 	require.Empty(t, m.Pricing.Intervals)
 	require.Nil(t, m.Pricing.CacheWritePrice, "目录无价且渠道未配置 → 无价")
-	require.Nil(t, m.OfficialPricing)
+	require.NotNil(t, m.OfficialPricing)
+	require.InDelta(t, 3e-6, *m.OfficialPricing.InputPrice, 1e-15)
 }
 
 func TestListGroups_TimePricingPassthrough(t *testing.T) {
