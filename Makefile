@@ -13,6 +13,15 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/channelMonitorV2.spec.ts \
 	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \
 	src/views/auth/__tests__/WechatCallbackView.spec.ts \
+	src/views/auth/__tests__/RegisterView.spec.ts \
+	src/views/auth/__tests__/LoginView.spec.ts \
+	src/views/auth/__tests__/EmailVerifyView.spec.ts \
+	src/stores/__tests__/auth.spec.ts \
+	src/views/admin/__tests__/UsersView.spec.ts \
+	src/views/admin/__tests__/UsageView.spec.ts \
+	src/components/admin/usage/__tests__/UsageTable.spec.ts \
+	src/components/admin/usage/__tests__/UserTokenRanking.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsErrorLogTable.spec.ts \
 	src/views/user/__tests__/PaymentView.spec.ts \
 	src/views/user/__tests__/PaymentResultView.spec.ts \
 	src/views/user/__tests__/ChannelStatusView.mode.spec.ts \

@@ -2,9 +2,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LoginView from '@/views/auth/LoginView.vue'
 
-const { getPublicSettingsMock, pushMock } = vi.hoisted(() => ({
+const { getPublicSettingsMock, pushMock, loginMock } = vi.hoisted(() => ({
   getPublicSettingsMock: vi.fn(),
-  pushMock: vi.fn()
+  pushMock: vi.fn(),
+  loginMock: vi.fn()
 }))
 
 const publicSettings = {
@@ -50,7 +51,7 @@ vi.mock('vue-i18n', () => ({
 
 vi.mock('@/stores', () => ({
   useAuthStore: () => ({
-    login: vi.fn(),
+    login: loginMock,
     loginWithPasskey: vi.fn(),
     login2FA: vi.fn()
   }),
@@ -94,6 +95,8 @@ describe('LoginView registration entry', () => {
   beforeEach(() => {
     getPublicSettingsMock.mockReset()
     pushMock.mockReset()
+    loginMock.mockReset()
+    loginMock.mockResolvedValue({})
     getPublicSettingsMock.mockResolvedValue(publicSettings)
   })
 
@@ -114,5 +117,19 @@ describe('LoginView registration entry', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('auth.signUp')
+  })
+
+  it.each(['site-user', 'user@example.com'])('accepts the login identifier %s', async (identifier) => {
+    const wrapper = mountLogin()
+    await flushPromises()
+    await wrapper.get('#email').setValue(`  ${identifier}  `)
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(loginMock).toHaveBeenCalledWith(expect.objectContaining({
+      email: identifier,
+      password: 'secret-123'
+    }))
   })
 })

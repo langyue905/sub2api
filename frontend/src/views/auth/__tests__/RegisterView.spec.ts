@@ -148,6 +148,7 @@ describe('RegisterView', () => {
     })
     const wrapper = mountRegister()
     await flushPromises()
+    await wrapper.get('#username').setValue('confirmation-user')
     await wrapper.get('#email').setValue('user@example.com')
     await wrapper.get('#password').setValue('secret-123')
     await wrapper.get('#confirmPassword').setValue(confirmation)
@@ -168,6 +169,7 @@ describe('RegisterView', () => {
     expect(wrapper.get('#confirmPassword').classes()).not.toContain('input-error')
     expect(verifyActionMock).toHaveBeenCalledOnce()
     expect(registerMock).toHaveBeenCalledWith({
+      username: 'confirmation-user',
       email: 'user@example.com',
       password: 'secret-123',
       turnstile_token: undefined,
@@ -187,6 +189,7 @@ describe('RegisterView', () => {
     })
     const wrapper = mountRegister()
     await flushPromises()
+    await wrapper.get('#username').setValue('verification-user')
     await wrapper.get('#email').setValue('user@example.com')
     await wrapper.get('#password').setValue('secret-123')
     await wrapper.get('#confirmPassword').setValue('different-password')
@@ -201,6 +204,7 @@ describe('RegisterView', () => {
     await flushPromises()
 
     expect(JSON.parse(sessionStorage.getItem('register_data')!)).toEqual({
+      username: 'verification-user',
       email: 'user@example.com',
       password: 'secret-123'
     })
