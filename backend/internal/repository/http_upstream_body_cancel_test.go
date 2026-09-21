@@ -41,7 +41,7 @@ func TestHTTPUpstreamConcurrentCloseDoesNotStrandEOF(t *testing.T) {
 	releaseServer := func() { releaseOnce.Do(func() { close(release) }) }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "x")
-		w.(http.Flusher).Flush()
+		_ = http.NewResponseController(w).Flush()
 		select {
 		case <-release:
 		case <-r.Context().Done():
@@ -106,7 +106,8 @@ func TestHTTPUpstreamConcurrentCloseDoesNotStrandEOF(t *testing.T) {
 // The TLS case exercises DoWithTLS lifecycle ownership, not a uTLS handshake.
 func bodyCancelTestUpstream(t *testing.T, client *http.Client, fingerprint bool) (*upstreamClientEntry, func(*http.Request) (*http.Response, error)) {
 	t.Helper()
-	svc := NewHTTPUpstream(nil).(*httpUpstreamService)
+	svc, ok := NewHTTPUpstream(nil).(*httpUpstreamService)
+	require.True(t, ok)
 	var entry *upstreamClientEntry
 	var err error
 	profile := &tlsfingerprint.Profile{Name: "body-close-test"}
@@ -138,7 +139,7 @@ func TestHTTPUpstreamBodyCloseInterruptsRead(t *testing.T) {
 			srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
 				_, _ = io.WriteString(w, "x")
-				w.(http.Flusher).Flush()
+				_ = http.NewResponseController(w).Flush()
 				select {
 				case <-r.Context().Done():
 					close(serverCanceled)
@@ -210,7 +211,7 @@ func TestHTTPUpstreamCompletedBodyPreservesConnectionReuse(t *testing.T) {
 			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
 				_, _ = io.WriteString(w, payload)
-				w.(http.Flusher).Flush()
+				_ = http.NewResponseController(w).Flush()
 			}))
 			defer srv.Close()
 			entry, do := bodyCancelTestUpstream(t, srv.Client(), fingerprint)
@@ -269,7 +270,7 @@ func TestHTTPUpstreamClosePreservesDetachedSiblingUsage(t *testing.T) {
 			const usageTail = "data: {\"type\":\"response.completed\",\"usage\":{\"output_tokens\":17}}\n\n"
 			srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.WriteString(w, "x")
-				w.(http.Flusher).Flush()
+				_ = http.NewResponseController(w).Flush()
 				select {
 				case <-r.Context().Done():
 					return
