@@ -37,6 +37,9 @@ jobs:
       - name: Unit tests
         working-directory: backend
         run: make test-unit
+      - name: Upstream response lifecycle race regressions
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/repository -run 'TestHTTPUpstream(ConcurrentClose|BodyClose|CompletedBody|FailedRequest|ClosePreserves)' -count=3 -timeout=90s
       - name: Integration tests
         working-directory: backend
         run: make test-integration
@@ -80,3 +83,14 @@ jobs:
           version: v2.13
           args: --timeout=30m
           working-directory: backend
+
+  release-helpers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r .github/release-tools/requirements-release.txt
+      - run: python -m unittest discover -s .github/release-tools -p 'test_release_matrix.py'
+      - run: bash -n .github/release-tools/release-images.sh
