@@ -52,4 +52,5 @@ git diff upstream/main integration/upstream-20260921 -- frontend/src/views/auth 
 - 后端 Go 1.27.0 单元测试在本机运行；Windows 缺少 `sh` 导致的备份测试失败，通过仅在测试进程 PATH 加入 Git 自带 shell 解决。
 - GitHub Linux CI 检查后端单元/集成测试、golangci-lint、前端、部署脚本与发布辅助脚本。最终结果以 PR checks 为准。
 - 生产流式结束延迟证据和实验见 [调查报告](stream-eof-investigation-20260921.md)。此次官方更新本身不作为延迟已修复的依据。
+- 用户追加要求继续修复验证后，本分支增加每请求 cancel-before-Close 的候选修复及真实 Transport 回归测试；旧代码确定性失败、修复后通过，尚未部署。正式范围与验证限制见调查报告末节。
 - 本次没有修改线上渠道、重启/替换生产服务、运行生产迁移或在服务器编译。下一次部署前仍需单独验证升级迁移和回滚方案。

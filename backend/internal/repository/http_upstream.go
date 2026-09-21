@@ -219,8 +219,10 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	// 执行请求
 	client := s.httpClientForUpstreamRequest(entry.client, req)
 	client = httpClientWithGrokAccessDeniedFallback(client)
-	resp, err := servertiming.Do(client, req)
+	request, cancelBody := requestWithCancelableBody(req)
+	resp, err := servertiming.Do(client, request)
 	if err != nil {
+		cancelBody()
 		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
 		// 请求失败，立即减少计数
 		atomic.AddInt64(&entry.inFlight, -1)
@@ -234,7 +236,7 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 
 	// 包装响应体，在关闭时自动减少计数并更新时间戳
 	// 这确保了流式响应（如 SSE）在完全读取前不会被淘汰
-	resp.Body = wrapTrackedBody(resp.Body, func() {
+	resp.Body = wrapTrackedBody(resp.Body, cancelBody, func() {
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
 	})
@@ -283,8 +285,10 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 
 	client := s.httpClientForUpstreamRequest(entry.client, req)
 	client = httpClientWithGrokAccessDeniedFallback(client)
-	resp, err := servertiming.Do(client, req)
+	request, cancelBody := requestWithCancelableBody(req)
+	resp, err := servertiming.Do(client, request)
 	if err != nil {
+		cancelBody()
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
 		slog.Debug("tls_fingerprint_request_failed", "account_id", accountID, "error", err)
@@ -293,7 +297,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 
 	decompressResponseBody(resp)
 
-	resp.Body = wrapTrackedBody(resp.Body, func() {
+	resp.Body = wrapTrackedBody(resp.Body, cancelBody, func() {
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
 	})
@@ -1446,18 +1450,25 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 // 在 Close 时执行回调，用于更新请求计数
 type trackedBody struct {
 	io.ReadCloser // 原始响应体
+	cancel        context.CancelFunc
 	once          sync.Once
+	err           error
 	onClose       func() // 关闭时的回调函数
 }
 
 // Close 关闭响应体并执行回调
 // 使用 sync.Once 确保回调只执行一次
 func (b *trackedBody) Close() error {
-	err := b.ReadCloser.Close()
-	if b.onClose != nil {
-		b.once.Do(b.onClose)
-	}
-	return err
+	b.once.Do(func() {
+		if b.cancel != nil {
+			b.cancel()
+		}
+		b.err = b.ReadCloser.Close()
+		if b.onClose != nil {
+			b.onClose()
+		}
+	})
+	return b.err
 }
 
 // wrapTrackedBody 包装响应体以跟踪关闭事件
@@ -1465,15 +1476,31 @@ func (b *trackedBody) Close() error {
 //
 // 参数:
 //   - body: 原始响应体
+//   - cancel: 仅取消本次上游请求，在关闭响应体之前执行
 //   - onClose: 关闭时的回调函数
 //
 // 返回:
 //   - io.ReadCloser: 包装后的响应体
-func wrapTrackedBody(body io.ReadCloser, onClose func()) io.ReadCloser {
+func wrapTrackedBody(body io.ReadCloser, cancel context.CancelFunc, onClose func()) io.ReadCloser {
 	if body == nil {
+		cancel()
+		if onClose != nil {
+			onClose()
+		}
 		return body
 	}
-	return &trackedBody{ReadCloser: body, onClose: onClose}
+	return &trackedBody{ReadCloser: body, cancel: cancel, onClose: onClose}
+}
+
+// Give each body a private cancellation handle. Cancel before net/http Close
+// so an in-flight reader cannot be stranded at the HTTP/1 eofc handoff. The
+// caller's context remains untouched, and a fully read response stays reusable.
+func requestWithCancelableBody(req *http.Request) (*http.Request, context.CancelFunc) {
+	if req == nil {
+		return nil, func() {}
+	}
+	ctx, cancel := context.WithCancel(req.Context())
+	return req.Clone(ctx), cancel
 }
 
 // decompressResponseBody 根据 Content-Encoding 解压响应体。

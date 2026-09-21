@@ -37,6 +37,9 @@ jobs:
       - name: Unit tests
         working-directory: backend
         run: make test-unit
+      - name: Upstream response lifecycle race regressions
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/repository -run 'TestHTTPUpstream(ConcurrentClose|BodyClose|CompletedBody|FailedRequest|ClosePreserves)' -count=3 -timeout=90s
       - name: Integration tests
         working-directory: backend
         run: make test-integration
