@@ -188,6 +188,55 @@ func TestSecurityHeaders(t *testing.T) {
 		assert.Equal(t, 0, countDirectiveValue(csp, "connect-src", ImagePlaygroundAPIOrigin))
 	})
 
+	t.Run("canvas_workbench_allows_same_origin_embedding_and_local_media", func(t *testing.T) {
+		cfg := config.CSPConfig{
+			Enabled: true,
+			Policy:  "default-src 'self'; connect-src 'self' https: https://unexpected.example; img-src 'self'; media-src 'self'; frame-ancestors 'none'",
+		}
+		middleware := SecurityHeaders(cfg, nil)
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/playgrounds/canvas/index.html", nil)
+
+		middleware(c)
+
+		assert.Equal(t, "SAMEORIGIN", w.Header().Get("X-Frame-Options"))
+		csp := w.Header().Get("Content-Security-Policy")
+		assert.Equal(t, 1, countDirectiveValue(csp, "frame-ancestors", "'self'"))
+		assert.Equal(t, 0, countDirectiveValue(csp, "frame-ancestors", "'none'"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "connect-src", CanvasWorkbenchAPIOrigin))
+		assert.Equal(t, 1, countDirectiveValue(csp, "connect-src", "'self'"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "connect-src", "blob:"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "connect-src", "data:"))
+		assert.Equal(t, 0, countDirectiveValue(csp, "connect-src", "https:"))
+		assert.Equal(t, 0, countDirectiveValue(csp, "connect-src", "https://unexpected.example"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "img-src", "https:"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "img-src", "data:"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "img-src", "blob:"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "media-src", "https:"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "media-src", "blob:"))
+		assert.Equal(t, 1, countDirectiveValue(csp, "media-src", "data:"))
+	})
+
+	t.Run("canvas_workbench_exception_is_path_scoped", func(t *testing.T) {
+		cfg := config.CSPConfig{Enabled: true, Policy: "default-src 'self'; frame-ancestors 'none'"}
+		middleware := SecurityHeaders(cfg, nil)
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/playgrounds/canvas-admin/index.html", nil)
+
+		middleware(c)
+
+		assert.Equal(t, "DENY", w.Header().Get("X-Frame-Options"))
+		csp := w.Header().Get("Content-Security-Policy")
+		assert.Equal(t, 1, countDirectiveValue(csp, "frame-ancestors", "'none'"))
+		assert.Equal(t, 0, countDirectiveValue(csp, "connect-src", CanvasWorkbenchAPIOrigin))
+		assert.Equal(t, 0, countDirectiveValue(csp, "img-src", "data:"))
+		assert.Equal(t, 0, countDirectiveValue(csp, "media-src", "blob:"))
+	})
+
 	t.Run("api_route_skips_csp_nonce_generation", func(t *testing.T) {
 		cfg := config.CSPConfig{
 			Enabled: true,

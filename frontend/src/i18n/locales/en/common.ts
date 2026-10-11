@@ -168,6 +168,7 @@ export default {
     apiKeys: 'API Keys',
     batchImage: 'Batch Images',
     imagePlayground: 'Image Playground',
+    canvasWorkbench: 'Infinite Canvas',
     usage: 'Usage',
     redeem: 'Redeem',
     affiliate: 'Affiliate Rebates',

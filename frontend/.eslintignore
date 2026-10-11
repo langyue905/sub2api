@@ -9,6 +9,9 @@ node_modules/
 dist/
 ../backend/internal/web/dist/
 public/playgrounds/image/
+public/playgrounds/canvas/
+# Embedded React apps have their own dependency and build configuration.
+workbenches/
 
 # 忽略缓存
 .cache/

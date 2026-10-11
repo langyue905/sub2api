@@ -13,6 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
+import CanvasWorkbenchView from '@/views/user/CanvasWorkbenchView.vue'
 import ImagePlaygroundView from '@/views/user/ImagePlaygroundView.vue'
 
 /**
@@ -239,6 +240,18 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: false,
       title: 'Image Playground',
       titleKey: 'nav.imagePlayground',
+    }
+  },
+  {
+    path: '/canvas-workbench',
+    alias: '/canvas-workbench/',
+    name: 'CanvasWorkbench',
+    component: CanvasWorkbenchView,
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Canvas Workbench',
+      titleKey: 'nav.canvasWorkbench',
     }
   },
   {

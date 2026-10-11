@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gpt-image-playground-v0.7.8-sub2api-fix4'
+const CACHE_NAME = 'gpt-image-playground-sub2api-fixed-api-v1'
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon.svg']
 const APP_SHELL_URLS = new Set(APP_SHELL.map((path) => new URL(path, self.registration.scope).href))
 const ASSETS_PATH = new URL('./assets/', self.registration.scope).pathname
@@ -13,7 +13,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))),
+      Promise.all(keys.filter((key) => key.startsWith('gpt-image-playground-') && key !== CACHE_NAME).map((key) => caches.delete(key))),
     ),
   )
   self.clients.claim()

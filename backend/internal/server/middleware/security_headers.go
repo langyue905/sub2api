@@ -52,6 +52,10 @@ const (
 	// because the Sub shell hosts it in an iframe.
 	ImagePlaygroundPathPrefix = "/playgrounds/image/"
 	ImagePlaygroundAPIOrigin  = "https://api.zshai.cc"
+	// CanvasWorkbenchPathPrefix is the embedded infinite-canvas application.
+	// It has additional image and media CSP requirements for local previews.
+	CanvasWorkbenchPathPrefix = "/playgrounds/canvas/"
+	CanvasWorkbenchAPIOrigin  = "https://api.zshai.cc"
 )
 
 var requiredCSPDirectiveValues = []struct {
@@ -129,6 +133,7 @@ func SecurityHeaders(cfg config.CSPConfig, getFrameSrcOrigins func() []string) g
 			requestPath = c.Request.URL.Path
 		}
 		isImagePlayground := isImagePlaygroundPath(requestPath)
+		isCanvasWorkbench := isCanvasWorkbenchPath(requestPath)
 		if getFrameSrcOrigins != nil {
 			for _, origin := range getFrameSrcOrigins() {
 				if origin != "" {
@@ -138,13 +143,23 @@ func SecurityHeaders(cfg config.CSPConfig, getFrameSrcOrigins func() []string) g
 		}
 
 		c.Header("X-Content-Type-Options", "nosniff")
-		if isImagePlayground {
+		if isImagePlayground || isCanvasWorkbench {
 			// The image playground is intentionally embedded by the authenticated
 			// Sub shell. Keep the exception same-origin and path-scoped.
 			c.Header("X-Frame-Options", "SAMEORIGIN")
 			finalPolicy = allowSameOriginFrameEmbedding(finalPolicy)
+		}
+		if isImagePlayground {
 			finalPolicy = addToDirective(finalPolicy, "connect-src", ImagePlaygroundAPIOrigin)
 			finalPolicy = addToDirective(finalPolicy, "img-src", ImagePlaygroundAPIOrigin)
+		} else if isCanvasWorkbench {
+			// Do not inherit the shell's broad connect-src list. The embedded
+			// application holds an API key and must only talk to this relay.
+			finalPolicy = replaceDirective(finalPolicy, "connect-src", "'self' data: blob: "+CanvasWorkbenchAPIOrigin)
+			// Generated media may be served from a model provider's signed URL,
+			// but it is display-only and cannot receive the API key.
+			finalPolicy = replaceDirective(finalPolicy, "img-src", "'self' data: blob: https:")
+			finalPolicy = replaceDirective(finalPolicy, "media-src", "'self' data: blob: https:")
 		} else {
 			c.Header("X-Frame-Options", "DENY")
 		}
@@ -174,6 +189,12 @@ func SecurityHeaders(cfg config.CSPConfig, getFrameSrcOrigins func() []string) g
 // similarly named route (for example /playgrounds/image-admin) is unaffected.
 func isImagePlaygroundPath(path string) bool {
 	return strings.HasPrefix(strings.TrimSpace(path), ImagePlaygroundPathPrefix)
+}
+
+// isCanvasWorkbenchPath deliberately requires the slash after "canvas" so a
+// similarly named route (for example /playgrounds/canvas-admin) is unaffected.
+func isCanvasWorkbenchPath(path string) bool {
+	return strings.HasPrefix(strings.TrimSpace(path), CanvasWorkbenchPathPrefix)
 }
 
 // allowSameOriginFrameEmbedding replaces any existing frame-ancestors policy
@@ -255,6 +276,29 @@ func addToDirective(policy, directive, value string) string {
 		trimmed += ";"
 	}
 	return trimmed + " " + newCSPDirective(directive, value)
+}
+
+// replaceDirective replaces all values for a directive while retaining the
+// rest of the configured CSP policy. It is used for isolated embedded apps
+// that must not inherit broad global network permissions.
+func replaceDirective(policy, directive, value string) string {
+	parts := strings.Split(policy, ";")
+	for i, raw := range parts {
+		fields := strings.Fields(strings.TrimSpace(raw))
+		if len(fields) == 0 || fields[0] != directive {
+			continue
+		}
+		parts[i] = " " + directive + " " + value
+		return strings.Join(parts, ";")
+	}
+	trimmed := strings.TrimSpace(policy)
+	if trimmed == "" {
+		return directive + " " + value + ";"
+	}
+	if !strings.HasSuffix(trimmed, ";") {
+		trimmed += ";"
+	}
+	return trimmed + " " + directive + " " + value + ";"
 }
 
 func cspDirectiveEnd(policy, directive string) (int, bool) {

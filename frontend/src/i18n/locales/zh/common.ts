@@ -168,6 +168,7 @@ export default {
     apiKeys: 'API 密钥',
     batchImage: '批量生图',
     imagePlayground: '图片工作台',
+    canvasWorkbench: '无限画布',
     usage: '使用记录',
     redeem: '兑换',
     affiliate: '邀请返利',
