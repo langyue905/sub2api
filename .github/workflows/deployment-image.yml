@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - integration/v0.2.15-canvas-workbench
+      - integration/v0.2.15-video-plugin
     paths-ignore:
       - '**.md'
   workflow_dispatch:
@@ -20,6 +21,9 @@ jobs:
   image:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    strategy:
+      matrix:
+        component: [main, video-plugin]
     steps:
       - uses: actions/checkout@v6
       - uses: docker/setup-buildx-action@v3
@@ -32,25 +36,39 @@ jobs:
         id: metadata
         shell: bash
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:canvas-${GITHUB_SHA:0:12}"
+          suffix="canvas"
+          version="0.2.15-zsh-canvas"
+          if [[ "$GITHUB_REF_NAME" == "integration/v0.2.15-video-plugin" ]]; then
+            suffix="video"
+            version="0.2.15-zsh-video"
+          fi
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}"
+          context="."
+          if [[ "${{ matrix.component }}" == "video-plugin" ]]; then
+            repository="${repository}-video-plugin"
+            context="plugins/video-volcengine"
+          fi
+          image="${repository}:${suffix}-${GITHUB_SHA:0:12}"
           echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "context=$context" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "### Deployment image" >> "$GITHUB_STEP_SUMMARY"
           echo "$image" >> "$GITHUB_STEP_SUMMARY"
       - uses: docker/build-push-action@v6
         id: build
         with:
-          context: .
+          context: ${{ steps.metadata.outputs.context }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.metadata.outputs.image }}
           build-args: |
-            VERSION=0.2.15-zsh-canvas
+            VERSION=${{ steps.metadata.outputs.version }}
             COMMIT=${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=0.2.15-zsh-canvas
-          cache-from: type=gha,scope=deployment-amd64
-          cache-to: type=gha,mode=max,scope=deployment-amd64
+            org.opencontainers.image.version=${{ steps.metadata.outputs.version }}
+          cache-from: type=gha,scope=deployment-${{ matrix.component }}-amd64
+          cache-to: type=gha,mode=max,scope=deployment-${{ matrix.component }}-amd64
       - name: Record digest
         run: echo '${{ steps.build.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"

@@ -66,12 +66,15 @@ export function serializeVideoModelPrices(form: VideoModelPricesForm): VideoMode
   return result
 }
 
-export function videoModelPriceFamilyRows(form: VideoModelPricesForm) {
+export function videoModelPriceFamilyRows(form: VideoModelPricesForm, platform = 'grok') {
   const known = new Set<string>(grokVideoPriceFamilies.map(({ key }) => key))
   const extra = Object.keys(form)
     .map(normalizeFamily)
     .filter((family) => family && !known.has(family))
     .sort()
     .map((key) => ({ key, label: key }))
-  return [...grokVideoPriceFamilies, ...extra]
+  const builtins = platform === 'grok' ? grokVideoPriceFamilies : grokVideoPriceFamilies.filter(
+    ({ key }) => Object.values(form[key] ?? {}).some((value) => normalizePrice(value) !== null)
+  )
+  return [...builtins, ...extra]
 }

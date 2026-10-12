@@ -1052,7 +1052,7 @@
             {{ t(videoPricingI18nKey("title")) }}
           </label>
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            {{ t(videoPricingI18nKey("description")) }}
+            {{ t(videoPricingI18nKey(createForm.platform === "grok" ? "description" : "pluginDescription")) }}
           </p>
           <div class="mb-4">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -1125,9 +1125,13 @@
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ t("admin.groups.videoPricing.modelOverridesDescription") }}
             </p>
+            <div v-if="createForm.platform !== 'grok'" class="mt-3 flex gap-2">
+              <input v-model="createVideoPricingModel" class="input flex-1" :placeholder="t('admin.groups.videoPricing.customModel')" />
+              <button type="button" class="btn btn-secondary" @click="addVideoPricingModel(false)">{{ t('common.add') }}</button>
+            </div>
             <div class="mt-3 space-y-3">
               <div
-                v-for="family in videoModelPriceFamilyRows(createForm.video_model_prices)"
+                v-for="family in videoModelPriceFamilyRows(createForm.video_model_prices, createForm.platform)"
                 :key="family.key"
                 class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_repeat(3,minmax(0,7rem))] sm:items-end"
               >
@@ -1155,7 +1159,7 @@
             </div>
           </div>
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            {{ t(videoPricingI18nKey("modeHint")) }}
+            {{ t(videoPricingI18nKey(createForm.platform === "grok" ? "modeHint" : "pluginModeHint")) }}
           </p>
           <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
             <div class="mb-1 font-medium">
@@ -2692,7 +2696,7 @@
             {{ t(videoPricingI18nKey("title")) }}
           </label>
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            {{ t(videoPricingI18nKey("description")) }}
+            {{ t(videoPricingI18nKey(editForm.platform === "grok" ? "description" : "pluginDescription")) }}
           </p>
           <div class="mb-4">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -2765,9 +2769,13 @@
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ t("admin.groups.videoPricing.modelOverridesDescription") }}
             </p>
+            <div v-if="editForm.platform !== 'grok'" class="mt-3 flex gap-2">
+              <input v-model="editVideoPricingModel" class="input flex-1" :placeholder="t('admin.groups.videoPricing.customModel')" />
+              <button type="button" class="btn btn-secondary" @click="addVideoPricingModel(true)">{{ t('common.add') }}</button>
+            </div>
             <div class="mt-3 space-y-3">
               <div
-                v-for="family in videoModelPriceFamilyRows(editForm.video_model_prices)"
+                v-for="family in videoModelPriceFamilyRows(editForm.video_model_prices, editForm.platform)"
                 :key="family.key"
                 class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_repeat(3,minmax(0,7rem))] sm:items-end"
               >
@@ -2795,7 +2803,7 @@
             </div>
           </div>
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            {{ t(videoPricingI18nKey("modeHint")) }}
+            {{ t(videoPricingI18nKey(editForm.platform === "grok" ? "modeHint" : "pluginModeHint")) }}
           </p>
           <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
             <div class="mb-1 font-medium">
@@ -5175,6 +5183,17 @@ const onAccountSearchFocus = (
   if (!accountSearchResults.value[key]?.length) {
     searchAccounts(key);
   }
+};
+
+const createVideoPricingModel = ref('');
+const editVideoPricingModel = ref('');
+const addVideoPricingModel = (isEdit: boolean) => {
+  const input = isEdit ? editVideoPricingModel : createVideoPricingModel;
+  const model = input.value.trim().toLowerCase();
+  if (!model) return;
+  const form = isEdit ? editForm : createForm;
+  form.video_model_prices[model] ??= { '480p': null, '720p': null, '1080p': null };
+  input.value = '';
 };
 
 // 添加创建表单的路由规则

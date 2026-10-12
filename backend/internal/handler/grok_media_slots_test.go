@@ -420,3 +420,68 @@ func TestGrokMediaVideoCompletionStillClaimsBillingOnce(t *testing.T) {
 	}
 	require.Len(t, bindings.billed, 1)
 }
+
+func TestVideoPluginLookupUsesBoundAccountInCompositeGroup(t *testing.T) {
+	for _, groupPlatform := range []string{service.PlatformVideoPlugin, service.PlatformComposite} {
+		for _, action := range []string{"status", "content", "foreign user", "foreign key"} {
+			t.Run(groupPlatform+"/"+action, func(t *testing.T) {
+				h, slots, bindings, upstream := newGrokMediaSlotHandler(t, false, false, service.PlatformVideoPlugin)
+				c, w := grokMediaSlotContext(context.Background(), false)
+				key, _ := middleware2.GetAPIKeyFromContext(c)
+				key.Group.Platform = groupPlatform
+				upstream.call = func(req *http.Request, id int64) (*http.Response, error) {
+					require.Equal(t, int64(1), id)
+					require.Equal(t, "1", req.Header.Get("X-Sub2-Video-Account-ID"))
+					contentType, body := "application/json", `{"id":"task","status":"pending"}`
+					if strings.HasSuffix(req.URL.Path, "/content") {
+						contentType, body = "video/mp4", "mock-video-content"
+					}
+					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+				}
+				if action == "foreign user" {
+					c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 11, Concurrency: 5})
+				}
+				if action == "foreign key" {
+					key.ID++
+				}
+				if action == "content" {
+					h.GrokVideoContent(c)
+				} else {
+					h.GrokVideoStatus(c)
+				}
+				slots.assertReleased(t)
+				require.Zero(t, bindings.writes)
+				if strings.HasPrefix(action, "foreign") {
+					require.Equal(t, 404, w.Code)
+					require.Zero(t, upstream.calls)
+				} else {
+					require.Equal(t, 200, w.Code, w.Body.String())
+					require.Positive(t, upstream.calls)
+				}
+			})
+		}
+	}
+}
+
+func TestVideoPluginCompletionPreservesAliasAndClaimsOnce(t *testing.T) {
+	h, _, bindings, _ := newGrokMediaSlotHandler(t, false, false, service.PlatformVideoPlugin)
+	c, _ := grokMediaSlotContext(context.Background(), false)
+	key, _ := middleware2.GetAPIKeyFromContext(c)
+	require.NoError(t, h.gatewayService.StoreGrokVideoPendingBilling(c.Request.Context(), "task", 10, 20, service.GrokVideoPendingBilling{
+		Model: "public-video", BillingModel: "public-video", UpstreamModel: "provider-video", VideoDurationSeconds: 25, VideoResolution: "720p",
+	}))
+	result := &service.OpenAIForwardResult{ResponseID: "task", Model: "provider-video", BillingModel: "provider-video", VideoCount: 1}
+	subject := middleware2.AuthSubject{UserID: 10, Concurrency: 5}
+	for i := range 10 {
+		bill := prepareGrokVideoCompletionBilling(c.Request.Context(), h, zap.NewNop(), key, subject, "task", result)
+		if i == 0 {
+			require.NotNil(t, bill)
+			require.Equal(t, "public-video", bill.BillingModel)
+			require.Equal(t, "provider-video", bill.UpstreamModel)
+			require.Equal(t, 25, bill.VideoDurationSeconds)
+		} else {
+			require.Nil(t, bill)
+		}
+	}
+	require.Len(t, bindings.billed, 1)
+}

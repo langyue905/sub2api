@@ -269,6 +269,17 @@ func (a *Account) IsGrok() bool {
 	return a.Platform == PlatformGrok
 }
 
+func (a *Account) IsVideoPlugin() bool {
+	return a != nil && a.Platform == PlatformVideoPlugin
+}
+
+func (a *Account) GetVideoPluginBaseURL() string {
+	if !a.IsVideoPlugin() || a.Type != AccountTypeAPIKey {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(a.GetCredential("base_url")), "/")
+}
+
 func (a *Account) IsTypeSafe() bool {
 	return a != nil && a.Platform == PlatformTypeSafe
 }

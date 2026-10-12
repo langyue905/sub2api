@@ -217,6 +217,19 @@
           </button>
           <button
             type="button"
+            data-testid="select-video-plugin-platform"
+            @click="selectVideoPluginPlatform"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'video_plugin'
+                ? 'bg-white text-cyan-700 shadow-sm dark:bg-dark-600 dark:text-cyan-300'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon platform="video_plugin" size="sm" />
+            视频插件
+          </button>
+          <button type="button"
             @click="selectCNPlatform('minimax')"
             :class="[
               'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
@@ -1484,8 +1497,44 @@
           <p v-if="apiKeyHint" class="input-hint">{{ apiKeyHint }}</p>
         </div>
 
+        <template v-if="form.platform === 'video_plugin'">
+          <div>
+            <label class="input-label">插件共享令牌</label>
+            <input
+              v-model="videoPluginToken"
+              data-testid="video-plugin-token"
+              type="password"
+              class="input font-mono"
+              placeholder="同机部署可留空，远程插件填写共享令牌"
+            />
+            <p class="input-hint">同机部署留空时使用服务器托管的共享令牌。</p>
+          </div>
+          <div class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600">
+            <label class="input-label">视频上游协议</label>
+            <select v-model="videoProviderProtocol" data-testid="video-provider-protocol" class="input">
+              <option value="volcengine_ark">火山方舟原生</option>
+              <option value="waninter">万次元视频兼容</option>
+              <option value="openai_compatible">OpenAI 兼容视频中转</option>
+            </select>
+            <p class="input-hint">不同视频插件账号可以分别连接不同视频供应商。</p>
+            <template v-if="videoProviderProtocol !== 'volcengine_ark'">
+              <label class="input-label">视频供应商接口地址</label>
+              <input v-model="videoProviderBaseUrl" data-testid="video-provider-base-url" type="url" class="input" placeholder="例如 https://api.waninter.com" />
+              <label class="input-label">创建任务路径</label>
+              <input v-model="videoProviderCreatePath" type="text" class="input font-mono" placeholder="/v1/videos/generations" />
+              <label class="input-label">查询任务路径</label>
+              <input v-model="videoProviderStatusPath" type="text" class="input font-mono" placeholder="/v1/videos/{id}" />
+              <label class="input-label">下载内容路径</label>
+              <input v-model="videoProviderContentPath" type="text" class="input font-mono" placeholder="/v1/videos/{id}/content" />
+              <label class="input-label">模型列表路径</label>
+              <input v-model="videoProviderModelsPath" type="text" class="input font-mono" placeholder="/v1/models" />
+            </template>
+          </div>
+        </template>
+
         <!-- 上游倍率自动探测：全部 API-key 平台可用（所在区块已限定 apikey 类型） -->
         <div
+          v-if="form.platform !== 'video_plugin'"
           class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
         >
           <div>
@@ -4096,12 +4145,14 @@ const baseUrlHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
   if (form.platform === 'grok') return ''
+  if (form.platform === 'video_plugin') return '填写服务器内部的视频插件地址。'
   return t('admin.accounts.baseUrlHint')
 })
 
 const apiKeyHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.apiKeyHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.apiKeyHint')
+  if (form.platform === 'video_plugin') return '填写视频供应商的接口密钥。'
   // Grok 与多协议供应商没有对应的说明文案；通用文案指 Claude Console Key。
   if (form.platform === 'grok' || isMultiProtocolPlatform.value) return ''
   return t('admin.accounts.apiKeyHint')
@@ -4120,6 +4171,8 @@ const apiKeyBaseUrlPlaceholder = computed(() => {
       return 'https://generativelanguage.googleapis.com'
     case 'grok':
       return 'https://api.x.ai/v1'
+    case 'video_plugin':
+      return 'http://video-plugin-volcengine:8081'
     case 'typesafe':
       return 'https://api.typesafe.ai'
     default:
@@ -4135,6 +4188,8 @@ const apiKeyValuePlaceholder = computed(() => {
       return 'AIza...'
     case 'grok':
       return 'xai-...'
+    case 'video_plugin':
+      return '视频供应商接口密钥'
     case 'kimi':
       return 'sk-...'
     case 'zhipu':
@@ -4232,6 +4287,13 @@ const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_acco
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
+const videoPluginToken = ref('')
+const videoProviderProtocol = ref('volcengine_ark')
+const videoProviderBaseUrl = ref('')
+const videoProviderCreatePath = ref('/v1/videos/generations')
+const videoProviderStatusPath = ref('/v1/videos/{id}')
+const videoProviderContentPath = ref('/v1/videos/{id}/content')
+const videoProviderModelsPath = ref('/v1/models')
 const upstreamBillingAutoProbeEnabled = ref(true)
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
@@ -4349,6 +4411,16 @@ function selectCNPlatform(platform: CnProviderPlatform) {
   apiKeyBaseUrl.value = defaultCNBaseUrl(platform, accountMode.value, apiProtocol.value)
   resetAdaptiveBaseUrls(platform, accountMode.value)
 }
+function selectVideoPluginPlatform() {
+  form.platform = 'video_plugin'
+  accountCategory.value = 'apikey'
+  form.type = 'apikey'
+  apiKeyBaseUrl.value = 'http://video-plugin-volcengine:8081'
+  videoProviderProtocol.value = 'volcengine_ark'
+  videoProviderBaseUrl.value = ''
+  upstreamBillingAutoProbeEnabled.value = false
+}
+
 function selectOpenCodeGoPlatform() {
   form.platform = 'opencode_go'
   form.type = 'apikey'
@@ -4446,13 +4518,23 @@ const syncPreviewCredentials = computed(() => {
     allowedModels.value,
     modelMappings.value
   )
-  return {
+  const credentials: Record<string, any> & { platform: string; type: string; api_key: string } = {
     platform: form.platform,
     type: form.type,
     base_url: baseUrl || undefined,
     api_key: apiKeyValue.value,
     ...(modelMapping ? { model_mapping: modelMapping } : {})
   }
+  if (form.platform === 'video_plugin') {
+    if (videoPluginToken.value.trim()) credentials.plugin_token = videoPluginToken.value.trim()
+    credentials.provider_protocol = videoProviderProtocol.value
+    if (videoProviderBaseUrl.value.trim()) credentials.provider_base_url = videoProviderBaseUrl.value.trim()
+    if (videoProviderCreatePath.value.trim()) credentials.provider_create_path = videoProviderCreatePath.value.trim()
+    if (videoProviderStatusPath.value.trim()) credentials.provider_status_path = videoProviderStatusPath.value.trim()
+    if (videoProviderContentPath.value.trim()) credentials.provider_content_path = videoProviderContentPath.value.trim()
+    if (videoProviderModelsPath.value.trim()) credentials.provider_models_path = videoProviderModelsPath.value.trim()
+  }
+  return credentials
 })
 
 const editQuotaLimit = ref<number | null>(null)
@@ -4955,6 +5037,8 @@ watch(
             ? 'https://generativelanguage.googleapis.com'
             : newPlatform === 'grok'
               ? 'https://api.x.ai/v1'
+              : newPlatform === 'video_plugin'
+                ? 'http://video-plugin-volcengine:8081'
               : newPlatform === 'typesafe'
                 ? 'https://api.typesafe.ai'
               : 'https://api.anthropic.com'
@@ -4991,6 +5075,13 @@ watch(
       modelRestrictionMode.value = 'mapping'
       form.concurrency = 1
       form.load_factor = null
+    }
+    if (newPlatform === 'video_plugin') {
+      accountCategory.value = 'apikey'
+      form.type = 'apikey'
+      form.concurrency = 1
+      form.load_factor = null
+      upstreamBillingAutoProbeEnabled.value = false
     }
     if (newPlatform !== 'gemini' && newPlatform !== 'anthropic' && accountCategory.value === 'service_account') {
       accountCategory.value = 'oauth-based'
@@ -5434,6 +5525,13 @@ const resetForm = () => {
   adaptiveBaseUrls.value = { chat_completions: '', anthropic: '', responses: '' }
   apiKeyBaseUrl.value = 'https://api.anthropic.com'
   apiKeyValue.value = ''
+  videoPluginToken.value = ''
+  videoProviderProtocol.value = 'volcengine_ark'
+  videoProviderBaseUrl.value = ''
+  videoProviderCreatePath.value = '/v1/videos/generations'
+  videoProviderStatusPath.value = '/v1/videos/{id}'
+  videoProviderContentPath.value = '/v1/videos/{id}/content'
+  videoProviderModelsPath.value = '/v1/models'
   upstreamRequestIdHeader.value = ''
   upstreamBillingAutoProbeEnabled.value = true
   editQuotaLimit.value = null
@@ -5891,6 +5989,8 @@ const handleSubmit = async () => {
         ? 'https://generativelanguage.googleapis.com'
         : form.platform === 'grok'
           ? 'https://api.x.ai/v1'
+          : form.platform === 'video_plugin'
+            ? 'http://video-plugin-volcengine:8081'
           : form.platform === 'typesafe'
             ? 'https://api.typesafe.ai'
           : 'https://api.anthropic.com'
@@ -5899,6 +5999,15 @@ const handleSubmit = async () => {
   const credentials: Record<string, unknown> = {
     base_url: apiKeyBaseUrl.value.trim() || defaultBaseUrl,
     api_key: apiKeyValue.value.trim()
+  }
+  if (form.platform === 'video_plugin') {
+    if (videoPluginToken.value.trim()) credentials.plugin_token = videoPluginToken.value.trim()
+    credentials.provider_protocol = videoProviderProtocol.value
+    if (videoProviderBaseUrl.value.trim()) credentials.provider_base_url = videoProviderBaseUrl.value.trim()
+    credentials.provider_create_path = videoProviderCreatePath.value.trim() || '/v1/videos/generations'
+    credentials.provider_status_path = videoProviderStatusPath.value.trim() || '/v1/videos/{id}'
+    credentials.provider_content_path = videoProviderContentPath.value.trim() || '/v1/videos/{id}/content'
+    credentials.provider_models_path = videoProviderModelsPath.value.trim() || '/v1/models'
   }
   if (form.platform === 'gemini') {
     credentials.tier_id = geminiTierAIStudio.value

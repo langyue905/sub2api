@@ -169,6 +169,14 @@ const props = defineProps<{
     type: string
     base_url?: string
     api_key: string
+    plugin_token?: string
+    provider_protocol?: string
+    provider_base_url?: string
+    provider_create_path?: string
+    provider_status_path?: string
+    provider_content_path?: string
+    provider_models_path?: string
+    model_mapping?: Record<string, string>
   }
 }>()
 
@@ -313,7 +321,10 @@ const syncUpstreamModels = async () => {
       emit('upstream-synced')
     }
 
-    const newModels = [...props.modelValue]
+    const replaceWithUpstream = normalizedPlatforms.value.some(
+      platform => platform.toLowerCase() === 'video_plugin'
+    )
+    const newModels = replaceWithUpstream ? [] : [...props.modelValue]
     let addedCount = 0
     for (const model of upstreamModels) {
       if (!newModels.includes(model)) {

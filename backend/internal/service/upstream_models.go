@@ -772,7 +772,9 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 	}
 
 	extractModels := extractUpstreamModelIDs
-	if account.IsGrok() {
+	if account.IsVideoPlugin() {
+		extractModels = extractVideoPluginManifestModelIDs
+	} else if account.IsGrok() {
 		extractModels = extractGrokUpstreamModelIDs
 	}
 	models, err := extractModels(body)
@@ -790,6 +792,8 @@ func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, acc
 	switch {
 	case account.Platform == PlatformAntigravity:
 		return s.buildAntigravityAPIKeyModelsRequest(ctx, account)
+	case account.IsVideoPlugin():
+		return s.buildVideoPluginModelsRequest(ctx, account)
 	case account.IsGrok():
 		return s.buildGrokUpstreamModelsRequest(ctx, account)
 	case account.IsOpenAI() || account.IsMultiProtocolAPIKey():
@@ -804,6 +808,27 @@ func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, acc
 			fmt.Sprintf("Unsupported platform for upstream model sync: %s", account.Platform), nil,
 		)
 	}
+}
+
+func (s *AccountTestService) buildVideoPluginModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
+	if account == nil || account.Type != AccountTypeAPIKey {
+		return nil, newUpstreamModelSyncUnsupportedError("Video plugin model sync requires an API key account", nil)
+	}
+	apiKey := strings.TrimSpace(account.GetCredential("api_key"))
+	if apiKey == "" {
+		return nil, newUpstreamModelSyncConfigError("No video provider API key is available", nil)
+	}
+	baseURL, err := validateVideoPluginBaseURL(account.GetVideoPluginBaseURL())
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Invalid video plugin base URL", err)
+	}
+	target := strings.TrimRight(baseURL.String(), "/") + "/plugin/v1/manifest"
+	req, err := newVideoPluginRequest(ctx, http.MethodGet, target, nil, apiKey, account.GetCredential("plugin_token"))
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Invalid video plugin manifest URL", err)
+	}
+	applyVideoPluginUpstreamHeaders(req, account)
+	return req, nil
 }
 
 func (s *AccountTestService) buildGrokUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
@@ -1436,6 +1461,20 @@ func normalizeCodexInputModalities(modalities []string) []string {
 		normalized = append(normalized, modality)
 	}
 	return normalized
+}
+
+func extractVideoPluginManifestModelIDs(body []byte) ([]string, error) {
+	var manifest struct {
+		Protocol string   `json:"protocol"`
+		Models   []string `json:"models"`
+	}
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return nil, fmt.Errorf("parse video plugin manifest: %w", err)
+	}
+	if strings.TrimSpace(manifest.Protocol) != "sub2-video-plugin/v1" {
+		return nil, fmt.Errorf("unsupported video plugin protocol")
+	}
+	return dedupeAndSortModelIDs(manifest.Models), nil
 }
 
 func extractUpstreamModelIDsWithSelector(body []byte, selectID func(upstreamModelEntry) string) ([]string, error) {

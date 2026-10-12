@@ -1210,6 +1210,10 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		writeGrokModelsList(c, xai.DefaultModelIDs())
 		return
 	}
+	if platform == service.PlatformVideoPlugin {
+		writeModelsList(c, platform, nil)
+		return
+	}
 	if platform == service.PlatformTypeSafe {
 		writeModelsList(c, platform, []string{typesafe.JevLatestModel})
 		return
@@ -1498,6 +1502,8 @@ func defaultModelIDsForPlatform(platform string) []string {
 		return xai.DefaultModelIDs()
 	case service.PlatformOpenCodeGo:
 		return service.DefaultOpenCodeGoModelIDs()
+	case service.PlatformVideoPlugin:
+		return nil // Models are supplied by each configured video account.
 	case service.PlatformTypeSafe:
 		return []string{"jev-latest"}
 	case service.PlatformComposite:

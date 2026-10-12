@@ -1317,6 +1317,7 @@ function generateRoutedCodexFiles(
     kimi: 'kimi-k2.5',
     zhipu: 'glm-4.7',
     deepseek: 'deepseek-v4-pro',
+    video_plugin: '',
     minimax: 'MiniMax-M3',
     opencode_go: 'glm-5.3',
     composite: 'gpt-5.5'
@@ -1332,6 +1333,7 @@ function generateRoutedCodexFiles(
     kimi: 'Kimi',
     zhipu: 'Zhipu',
     deepseek: 'DeepSeek',
+    video_plugin: '视频插件',
     minimax: 'MiniMax',
     opencode_go: 'OpenCode',
     typesafe: 'TypeSafe / Jev',

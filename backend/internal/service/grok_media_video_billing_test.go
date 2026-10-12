@@ -72,6 +72,8 @@ func TestExtractGrokVideoBillingFromStatusBodyPrefersUpstreamParams(t *testing.T
 	require.NotNil(t, result)
 	require.Equal(t, 1, result.VideoCount)
 	require.Equal(t, "grok-imagine-video-1.5", result.Model)
+	// Provider model identifies the result; the create-time alias selects its price.
+	require.Equal(t, "pending-billing", result.BillingModel)
 	// Resolution is not in official status response — use create-time request.
 	require.Equal(t, VideoBillingResolution720P, result.VideoResolution)
 	// Duration prefers official video.duration.

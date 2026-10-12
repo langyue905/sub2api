@@ -43,6 +43,8 @@
                     ? 'https://cloudcode-pa.googleapis.com'
                     : account.platform === 'grok'
                       ? 'https://api.x.ai/v1'
+                      : account.platform === 'video_plugin'
+                        ? 'http://video-plugin-volcengine:8081'
                       : 'https://api.anthropic.com'
             "
           />
@@ -226,7 +228,9 @@
           <p class="input-hint mt-2">{{ t('admin.accounts.cnProviders.zhipuTeam.hint') }}</p>
         </div>
         <div>
-          <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
+          <label class="input-label">
+            {{ account.platform === 'video_plugin' ? '视频供应商接口密钥' : t('admin.accounts.apiKey') }}
+          </label>
           <input
             v-model="editApiKey"
             type="password"
@@ -248,6 +252,48 @@
             "
           />
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
+        </div>
+        <div v-if="account.platform === 'video_plugin'">
+          <label class="input-label">插件共享令牌</label>
+          <input
+            v-model="editVideoPluginToken"
+            type="password"
+            class="input font-mono"
+            autocomplete="new-password"
+            data-testid="edit-video-plugin-token"
+            placeholder="留空则保留当前令牌"
+          />
+          <p class="input-hint">必须与插件容器中的共享令牌一致。</p>
+        </div>
+        <div
+          v-if="account.platform === 'video_plugin'"
+          class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600"
+        >
+          <label class="input-label">视频上游协议</label>
+          <select v-model="editVideoProviderProtocol" class="input" data-testid="edit-video-provider-protocol">
+            <option value="volcengine_ark">火山方舟原生</option>
+            <option value="waninter">万次元视频兼容</option>
+            <option value="openai_compatible">OpenAI 兼容视频中转</option>
+          </select>
+          <p class="input-hint">不同视频插件账号可以分别指向不同中转站。</p>
+          <template v-if="editVideoProviderProtocol !== 'volcengine_ark'">
+            <label class="input-label">视频供应商接口地址</label>
+            <input
+              v-model="editVideoProviderBaseUrl"
+              type="url"
+              class="input"
+              data-testid="edit-video-provider-base-url"
+              placeholder="例如 https://api.waninter.com"
+            />
+            <label class="input-label">创建任务路径</label>
+            <input v-model="editVideoProviderCreatePath" type="text" class="input font-mono" placeholder="/v1/videos/generations" />
+            <label class="input-label">查询任务路径</label>
+            <input v-model="editVideoProviderStatusPath" type="text" class="input font-mono" placeholder="/v1/videos/{id}" />
+            <label class="input-label">下载内容路径</label>
+            <input v-model="editVideoProviderContentPath" type="text" class="input font-mono" placeholder="/v1/videos/{id}/content" />
+            <label class="input-label">模型列表路径</label>
+            <input v-model="editVideoProviderModelsPath" type="text" class="input font-mono" placeholder="/v1/models" />
+          </template>
         </div>
 
         <!-- Model Restriction Section (不适用于 Antigravity) -->
@@ -1990,7 +2036,7 @@
       </div>
 
       <div
-        v-if="account?.type === 'apikey'"
+        v-if="account?.type === 'apikey' && account.platform !== 'video_plugin'"
         class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div>
@@ -3357,6 +3403,7 @@ const baseUrlHint = computed(() => {
   if (props.account.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (props.account.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
   if (props.account.platform === 'grok') return ''
+  if (props.account.platform === 'video_plugin') return '填写插件容器在内部网络中的地址。'
   return t('admin.accounts.baseUrlHint')
 })
 
@@ -3380,6 +3427,13 @@ interface TempUnschedRuleForm {
 const submitting = ref(false)
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
+const editVideoPluginToken = ref('')
+const editVideoProviderProtocol = ref('volcengine_ark')
+const editVideoProviderBaseUrl = ref('')
+const editVideoProviderCreatePath = ref('/v1/videos/generations')
+const editVideoProviderStatusPath = ref('/v1/videos/{id}')
+const editVideoProviderContentPath = ref('/v1/videos/{id}/content')
+const editVideoProviderModelsPath = ref('/v1/models')
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）account_mode / api_protocol 编辑 ──
 // account_mode 决定额度/余额监控路径，api_protocol 决定转发端点与格式；
@@ -4034,6 +4088,7 @@ const defaultBaseUrl = computed(() => {
   if (props.account?.platform === 'openai') return 'https://api.openai.com'
   if (props.account?.platform === 'gemini') return 'https://generativelanguage.googleapis.com'
   if (props.account?.platform === 'grok') return 'https://api.x.ai/v1'
+  if (props.account?.platform === 'video_plugin') return 'http://video-plugin-volcengine:8081'
   if (props.account?.platform === 'typesafe') return 'https://api.typesafe.ai'
   // CN 供应商：按当前模式/协议回落到官方预设（清空输入框提交时使用），
   // 不能落到 anthropic 默认值（会被当 CC base 拼出错误端点）。
@@ -4411,6 +4466,22 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // Initialize API Key fields for apikey type
   if (newAccount.type === 'apikey' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
+    editVideoProviderProtocol.value = typeof credentials.provider_protocol === 'string' && credentials.provider_protocol.trim()
+      ? credentials.provider_protocol.trim()
+      : 'volcengine_ark'
+    editVideoProviderBaseUrl.value = typeof credentials.provider_base_url === 'string' ? credentials.provider_base_url.trim() : ''
+    editVideoProviderCreatePath.value = typeof credentials.provider_create_path === 'string' && credentials.provider_create_path.trim()
+      ? credentials.provider_create_path.trim()
+      : '/v1/videos/generations'
+    editVideoProviderStatusPath.value = typeof credentials.provider_status_path === 'string' && credentials.provider_status_path.trim()
+      ? credentials.provider_status_path.trim()
+      : '/v1/videos/{id}'
+    editVideoProviderContentPath.value = typeof credentials.provider_content_path === 'string' && credentials.provider_content_path.trim()
+      ? credentials.provider_content_path.trim()
+      : '/v1/videos/{id}/content'
+    editVideoProviderModelsPath.value = typeof credentials.provider_models_path === 'string' && credentials.provider_models_path.trim()
+      ? credentials.provider_models_path.trim()
+      : '/v1/models'
     // 国产供应商：读取 account_mode 与 api_protocol 作为可编辑初始值
     // （编辑弹窗允许修正两者，用于修复早期存错默认值的账号）。
     if (isMultiProtocolApiKeyPlatform(newAccount.platform)) {
@@ -4481,6 +4552,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
           ? 'https://generativelanguage.googleapis.com'
           : newAccount.platform === 'grok'
             ? 'https://api.x.ai/v1'
+            : newAccount.platform === 'video_plugin'
+              ? 'http://video-plugin-volcengine:8081'
             : newAccount.platform === 'typesafe'
               ? 'https://api.typesafe.ai'
             : isMultiProtocolApiKeyPlatform(newAccount.platform)
@@ -4577,6 +4650,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     selectedErrorCodes.value = []
   }
   editApiKey.value = ''
+  editVideoPluginToken.value = ''
 }
 
 async function loadTLSProfiles() {
@@ -5260,6 +5334,21 @@ const handleSubmit = async () => {
       } else if (!hasExistingApiKey) {
         appStore.showError(t('admin.accounts.apiKeyIsRequired'))
         return
+      }
+      if (props.account.platform === 'video_plugin' && editVideoPluginToken.value.trim()) {
+        newCredentials.plugin_token = editVideoPluginToken.value.trim()
+      }
+      if (props.account.platform === 'video_plugin') {
+        newCredentials.provider_protocol = editVideoProviderProtocol.value
+        if (editVideoProviderBaseUrl.value.trim()) {
+          newCredentials.provider_base_url = editVideoProviderBaseUrl.value.trim()
+        } else {
+          delete newCredentials.provider_base_url
+        }
+        newCredentials.provider_create_path = editVideoProviderCreatePath.value.trim() || '/v1/videos/generations'
+        newCredentials.provider_status_path = editVideoProviderStatusPath.value.trim() || '/v1/videos/{id}'
+        newCredentials.provider_content_path = editVideoProviderContentPath.value.trim() || '/v1/videos/{id}/content'
+        newCredentials.provider_models_path = editVideoProviderModelsPath.value.trim() || '/v1/models'
       }
 
       // Add model mapping if configured（OpenAI 开启自动透传时保留现有映射，不再编辑）

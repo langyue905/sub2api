@@ -2951,6 +2951,26 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 	}
 
 	// TypeSafe accounts serve only the native System One model.
+	if account.Platform == service.PlatformVideoPlugin {
+		mapping := account.GetModelMapping()
+		requestedModels := make([]string, 0, len(mapping))
+		for requestedModel := range mapping {
+			requestedModels = append(requestedModels, requestedModel)
+		}
+		sort.Strings(requestedModels)
+
+		models := make([]claude.Model, 0, len(requestedModels))
+		for _, requestedModel := range requestedModels {
+			models = append(models, claude.Model{
+				ID:          requestedModel,
+				Type:        "model",
+				DisplayName: requestedModel,
+			})
+		}
+		response.Success(c, models)
+		return
+	}
+
 	if account.IsTypeSafe() {
 		response.Success(c, []claude.Model{{ID: typesafe.JevLatestModel, Type: "model", DisplayName: typesafe.JevLatestModel}})
 		return
@@ -3087,11 +3107,18 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 // POST /api/v1/admin/accounts/models/sync-upstream-preview
 func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 	var req struct {
-		Platform     string            `json:"platform" binding:"required"`
-		Type         string            `json:"type" binding:"required"`
-		BaseURL      string            `json:"base_url"`
-		APIKey       string            `json:"api_key" binding:"required"`
-		ModelMapping map[string]string `json:"model_mapping"`
+		Platform            string            `json:"platform" binding:"required"`
+		Type                string            `json:"type" binding:"required"`
+		BaseURL             string            `json:"base_url"`
+		APIKey              string            `json:"api_key" binding:"required"`
+		ModelMapping        map[string]string `json:"model_mapping"`
+		PluginToken         string            `json:"plugin_token"`
+		ProviderProtocol    string            `json:"provider_protocol"`
+		ProviderBaseURL     string            `json:"provider_base_url"`
+		ProviderCreatePath  string            `json:"provider_create_path"`
+		ProviderStatusPath  string            `json:"provider_status_path"`
+		ProviderContentPath string            `json:"provider_content_path"`
+		ProviderModelsPath  string            `json:"provider_models_path"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -3106,9 +3133,16 @@ func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 		Platform: req.Platform,
 		Type:     req.Type,
 		Credentials: map[string]any{
-			"api_key":       req.APIKey,
-			"base_url":      req.BaseURL,
-			"model_mapping": modelMapping,
+			"api_key":               req.APIKey,
+			"base_url":              req.BaseURL,
+			"model_mapping":         modelMapping,
+			"plugin_token":          req.PluginToken,
+			"provider_protocol":     req.ProviderProtocol,
+			"provider_base_url":     req.ProviderBaseURL,
+			"provider_create_path":  req.ProviderCreatePath,
+			"provider_status_path":  req.ProviderStatusPath,
+			"provider_content_path": req.ProviderContentPath,
+			"provider_models_path":  req.ProviderModelsPath,
 		},
 	}
 

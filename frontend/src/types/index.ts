@@ -547,7 +547,7 @@ export interface PaginationConfig {
  * 分组平台：具体平台或 composite。具体平台以平台清单（constants/platformCatalog）
  * 为准，后端新登记的平台是 KnownAccountPlatform 之外的字符串。
  */
-export type GroupPlatform = AccountPlatform | 'composite'
+export type GroupPlatform = 'video_plugin' | AccountPlatform | 'composite'
 
 export type VideoModelPrices = Record<string, Record<string, number>>
 
@@ -933,7 +933,7 @@ export type KnownAccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigrav
  * 账号平台：内置平台，或后端平台清单中新登记的平台（任意字符串）。
  * `string & {}` 保留内置平台的字面量补全。
  */
-export type AccountPlatform = KnownAccountPlatform | (string & {})
+export type AccountPlatform = 'video_plugin' | KnownAccountPlatform | (string & {})
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'

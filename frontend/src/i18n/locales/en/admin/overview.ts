@@ -1085,6 +1085,9 @@ export default {
         notConfigured: 'Not configured'
       },
       videoPricing: {
+        pluginDescription: 'Video plugins require explicit model pricing. Set per-second rates here, or configure per-request or token pricing in model/channel pricing. Grok defaults do not apply.',
+        pluginModeHint: 'Per-second rate × actual duration × video count × multiplier. Per-request or token pricing uses the corresponding billing mode.',
+        customModel: 'Enter video model ID',
         title: 'Video Generation Pricing',
         description:
           'Configure Grok video generation prices in USD per second of output video. Leave empty to use the default per-second rates (grok-imagine-video: $0.05/s 480p, $0.07/s 720p; video-1.5: $0.08/s 480p, $0.14/s 720p, $0.25/s 1080p).',

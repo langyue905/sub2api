@@ -30,6 +30,8 @@ func RegisterGatewayRoutes(
 	compositeResolver *service.CompositeRouteResolver,
 	cfg *config.Config,
 ) {
+	r.GET("/v1/video-references/:token", service.ServeTemporaryVideoReference)
+
 	bodyLimit := middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize)
 	textBodyLimit := middleware.RequestBodyLimit(cfg.Gateway.TextMaxBodySize)
 	clientRequestID := middleware.ClientRequestID()
@@ -92,8 +94,8 @@ func RegisterGatewayRoutes(
 	videoGenerationHandler := func(c *gin.Context) {
 		// Video status/content lookups below already allow Composite groups; keep
 		// task creation aligned so composite keys that route to Grok accounts can
-		// submit video generation jobs.
-		if platform := getGroupPlatform(c); platform == service.PlatformGrok || platform == service.PlatformComposite {
+		// submit video generation jobs. Video plugins use the same gateway entry.
+		if platform := getGroupPlatform(c); platform == service.PlatformGrok || platform == service.PlatformComposite || platform == service.PlatformVideoPlugin {
 			h.OpenAIGateway.GrokVideoGeneration(c)
 			return
 		}
@@ -109,7 +111,7 @@ func RegisterGatewayRoutes(
 		// Video status requests do not carry a model, so composite groups cannot
 		// be resolved by compositeTargetPlatformMiddleware. Route them through
 		// the Grok handler and let scheduler/account selection enforce capacity.
-		if getGroupPlatform(c) == service.PlatformGrok || getGroupPlatform(c) == service.PlatformComposite {
+		if getGroupPlatform(c) == service.PlatformGrok || getGroupPlatform(c) == service.PlatformVideoPlugin || getGroupPlatform(c) == service.PlatformComposite {
 			h.OpenAIGateway.GrokVideoStatus(c)
 			return
 		}
@@ -125,7 +127,7 @@ func RegisterGatewayRoutes(
 		// Video content requests do not carry a model, so composite groups cannot
 		// be resolved by compositeTargetPlatformMiddleware. Route them through
 		// the Grok handler just like video status lookups.
-		if getGroupPlatform(c) == service.PlatformGrok || getGroupPlatform(c) == service.PlatformComposite {
+		if getGroupPlatform(c) == service.PlatformGrok || getGroupPlatform(c) == service.PlatformVideoPlugin || getGroupPlatform(c) == service.PlatformComposite {
 			h.OpenAIGateway.GrokVideoContent(c)
 			return
 		}

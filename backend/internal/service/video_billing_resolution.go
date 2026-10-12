@@ -31,6 +31,14 @@ func NormalizeVideoBillingDurationSecondsOrDefault(durationSeconds int) int {
 	return durationSeconds
 }
 
+// The 15-second limit belongs to native Grok, not other video providers.
+func NormalizeVideoBillingDurationForModel(model string, durationSeconds int) int {
+	if CanonicalGrokImagineVideoPriceFamily(model) != "" || durationSeconds <= 0 {
+		return NormalizeVideoBillingDurationSecondsOrDefault(durationSeconds)
+	}
+	return durationSeconds
+}
+
 // LookupVideoBillingResolution 归一化分辨率并报告是否为已知档位。
 // 配置解析路径必须用它而不是 OrDefault：把无法识别的档位（如 "4k"、拼错的
 // "1080i"）静默折算成 480p，会让管理员配的高分辨率单价被挂到低分辨率档上。

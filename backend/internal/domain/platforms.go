@@ -39,6 +39,7 @@ var platformList = []PlatformSpec{
 	{ID: PlatformOpenAI, DisplayName: "OpenAI", Gateway: PlatformGatewayOpenAI, LiteLLMProvider: "openai"},
 	{ID: PlatformGemini, DisplayName: "Gemini", Gateway: PlatformGatewayGemini, LiteLLMProvider: "gemini"},
 	{ID: PlatformAntigravity, DisplayName: "Antigravity", Gateway: PlatformGatewayAntigravity, LiteLLMProvider: "anthropic"},
+	{ID: PlatformVideoPlugin, DisplayName: "视频插件", Gateway: PlatformGatewayOpenAI},
 	{ID: PlatformGrok, DisplayName: "Grok", Gateway: PlatformGatewayOpenAI, LiteLLMProvider: "xai"},
 	{ID: PlatformKimi, DisplayName: "Kimi", Gateway: PlatformGatewayOpenAI, CNProvider: true, LiteLLMProvider: "moonshot"},
 	{ID: PlatformZhipu, DisplayName: "Zhipu GLM", Gateway: PlatformGatewayOpenAI, CNProvider: true, LiteLLMProvider: "zhipu"},

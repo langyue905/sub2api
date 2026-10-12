@@ -411,6 +411,10 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.testGrokAccountConnection(c, account, modelID, prompt, mode, testOpts)
 	}
 
+	if account.Platform == PlatformVideoPlugin {
+		return s.testVideoPluginConnection(c, account, modelID)
+	}
+
 	if account.Platform == PlatformAntigravity {
 		return s.routeAntigravityTest(c, account, modelID, prompt)
 	}
@@ -474,6 +478,48 @@ func (s *AccountTestService) testModelRoutedResponsesConnection(c *gin.Context, 
 	c.Writer.Flush()
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	return s.testCNProviderAdaptiveResponsesConnection(c, account, testModelID, authToken)
+}
+
+func (s *AccountTestService) testVideoPluginConnection(c *gin.Context, account *Account, modelID string) error {
+	if s.httpUpstream == nil {
+		return s.sendErrorAndEnd(c, "HTTP upstream not configured")
+	}
+	baseURL, err := validateVideoPluginBaseURL(account.GetVideoPluginBaseURL())
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Invalid video plugin base URL: "+err.Error())
+	}
+	testModel := strings.TrimSpace(modelID)
+	if testModel == "" {
+		testModel = "自动发现供应商模型"
+	}
+	s.prepareGrokTestSSE(c)
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModel})
+
+	target := strings.TrimRight(baseURL.String(), "/") + "/plugin/v1/manifest"
+	req, err := newVideoPluginRequest(c.Request.Context(), http.MethodGet, target, nil,
+		account.GetCredential("api_key"), account.GetCredential("plugin_token"))
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to build video plugin request")
+	}
+	applyVideoPluginUpstreamHeaders(req, account)
+	resp, err := s.httpUpstream.Do(req, "", account.ID, account.Concurrency)
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Video plugin connection failed: "+err.Error())
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to read video plugin response")
+	}
+	if resp.StatusCode >= http.StatusBadRequest {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Video plugin returned %d: %s", resp.StatusCode, truncateString(string(body), 512)))
+	}
+	if !gjson.ValidBytes(body) || strings.TrimSpace(gjson.GetBytes(body, "protocol").String()) != "sub2-video-plugin/v1" {
+		return s.sendErrorAndEnd(c, "Video plugin returned an invalid manifest")
+	}
+	s.sendEvent(c, TestEvent{Type: "content", Text: "Video plugin protocol and internal authentication are ready."})
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
 }
 
 func (s *AccountTestService) testCNProviderChatCompletionsConnection(c *gin.Context, account *Account, modelID string, prompt string) error {

@@ -1082,6 +1082,9 @@ export default {
         notConfigured: '未配置'
       },
       videoPricing: {
+        pluginDescription: '视频插件必须明确配置模型价格。可填写下方每秒价格，或在逐模型/渠道定价中设置按次或 Token 计费；不使用 Grok 默认价格。',
+        pluginModeHint: '每秒价格 × 实际时长 × 视频数量 × 倍率。采用按次或 Token 定价时，按对应定价方式结算。',
+        customModel: '填写视频模型 ID',
         title: '视频生成计费',
         description:
           '配置 Grok 视频生成的每秒单价（USD/秒），留空则使用默认每秒价（grok-imagine-video：480p $0.05/s、720p $0.07/s；video-1.5：480p $0.08/s、720p $0.14/s、1080p $0.25/s）',

@@ -73,6 +73,14 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		return
 	}
 
+	if !endpoint.IsSeedance() && apiKey.Group != nil && apiKey.Group.Platform == service.PlatformVideoPlugin {
+		platform = service.PlatformVideoPlugin
+		noAccountCode, noAccountMessage = "video_plugin_no_eligible_account", "No eligible video plugin accounts"
+	}
+	if !endpoint.IsSeedance() && endpoint.IsVideoLookupRequest() && apiKey.Group != nil && apiKey.Group.Platform == service.PlatformComposite {
+		platform = service.PlatformComposite
+	}
+
 	reqLog := requestLogger(
 		c,
 		"handler.openai_gateway.grok_media",
@@ -223,6 +231,9 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	}
 	routingStart := time.Now()
 	requiredCapability := grokMediaRequiredCapability(endpoint)
+	if platform == service.PlatformVideoPlugin {
+		requiredCapability = ""
+	}
 	var accountReleaseFunc func()
 	releaseAccount := func() {
 		if accountReleaseFunc != nil {
@@ -334,7 +345,13 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		)
 
 		account := selection.Account
-		if endpoint.IsGenerationRequest() && !endpoint.IsSeedance() {
+		if account.IsVideoPlugin() && endpoint.IsGenerationRequest() {
+			if err := h.gatewayService.ValidateVideoPluginPricing(requestCtx, apiKey, routingModel, requestInfo.Resolution); err != nil {
+				h.errorResponse(c, http.StatusServiceUnavailable, "video_pricing_not_configured", "Video model pricing must be configured by the administrator before generation")
+				return
+			}
+		}
+		if endpoint.IsGenerationRequest() && platform == service.PlatformGrok {
 			eligible, eligibilityReason, eligibilityErr := h.ensureGrokMediaAccountEligibility(requestCtx, account)
 			if !eligible {
 				releaseAccount()
@@ -658,15 +675,11 @@ func prepareGrokVideoCompletionBilling(
 	// Re-merge with pending: resolution is request-only; model/duration fill gaps.
 	merged := *statusResult
 	if pending != nil {
-		if strings.TrimSpace(merged.Model) == "" {
-			merged.Model = firstNonEmptyString(pending.BillingModel, pending.Model, pending.OriginalModel)
-		}
-		if strings.TrimSpace(merged.BillingModel) == "" {
-			merged.BillingModel = firstNonEmptyString(pending.BillingModel, pending.Model, merged.Model)
-		}
-		if strings.TrimSpace(merged.UpstreamModel) == "" {
-			merged.UpstreamModel = pending.UpstreamModel
-		}
+		// Provider status may use its internal model ID. Preserve the model and
+		// billing alias accepted at creation, including account model mappings.
+		merged.Model = firstNonEmptyString(pending.Model, merged.Model, pending.OriginalModel)
+		merged.BillingModel = firstNonEmptyString(pending.BillingModel, pending.Model, merged.BillingModel)
+		merged.UpstreamModel = firstNonEmptyString(pending.UpstreamModel, merged.UpstreamModel)
 		// Official status omits resolution — always prefer create request.
 		if strings.TrimSpace(pending.VideoResolution) != "" {
 			merged.VideoResolution = pending.VideoResolution
@@ -694,7 +707,7 @@ func prepareGrokVideoCompletionBilling(
 	// Official default resolution is 480p when the create request omitted it.
 	merged.VideoResolution = service.NormalizeVideoBillingResolutionOrDefault(merged.VideoResolution)
 	// Official default duration is 8s when neither status nor create provided it.
-	merged.VideoDurationSeconds = service.NormalizeVideoBillingDurationSecondsOrDefault(merged.VideoDurationSeconds)
+	merged.VideoDurationSeconds = service.NormalizeVideoBillingDurationForModel(merged.BillingModel, merged.VideoDurationSeconds)
 	// E2E latency for async video: create accept → this discovery of done+url.
 	// Bill on discovery (status/content), not after further client polls; duration
 	// must not be only the single discovery hop (~hundreds of ms).

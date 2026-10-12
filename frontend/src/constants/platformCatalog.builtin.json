@@ -29,6 +29,12 @@
       "litellm_provider": "anthropic"
     },
     {
+      "id": "video_plugin",
+      "display_name": "视频插件",
+      "gateway": "openai",
+      "cn_provider": false
+    },
+    {
       "id": "grok",
       "display_name": "Grok",
       "gateway": "openai",
@@ -285,6 +291,7 @@
     "gemini",
     "openai",
     "antigravity",
+    "video_plugin",
     "grok",
     "kimi",
     "zhipu",
