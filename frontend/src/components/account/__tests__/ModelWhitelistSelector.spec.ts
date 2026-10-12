@@ -100,7 +100,7 @@ describe('ModelWhitelistSelector', () => {
     resetPlatformCatalog()
   })
 
-  it.each(['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'command_code', 'cline'])(
+  it.each(['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'command_code', 'cline', 'video_plugin'])(
     'supports upstream sync for %s saved accounts and creation previews',
     (platform) => {
       const wrappers = [
@@ -113,6 +113,84 @@ describe('ModelWhitelistSelector', () => {
       }
     }
   )
+
+  it('syncs a saved video account and keeps returned models selectable after clearing the whitelist', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: [' wan3.0 ', 'seedance2.0', 'wan3.0', ''] })
+    const wrapper = mountSelector({ platform: 'video_plugin', accountId: 270, modelValue: ['old-video'] })
+    expect(wrapper.findAll('button').some(button => button.text() === 'admin.accounts.fillRelatedModels')).toBe(false)
+
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.syncUpstreamModels')!.trigger('click')
+    await flushPromises()
+
+    expect(syncUpstreamModels).toHaveBeenCalledWith(270)
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['wan3.0', 'seedance2.0']]])
+    await wrapper.setProps({ modelValue: [] })
+    await wrapper.get('div.cursor-pointer').trigger('click')
+    expect(wrapper.findAll('[data-testid="model-option"]')).toHaveLength(2)
+    await findModelRow(wrapper, 'wan3.0').get('[data-testid="select-model"]').trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([['wan3.0']])
+    expect(wrapper.emitted('upstream-synced')).toBeUndefined()
+  })
+
+  it('passes the full video provider configuration to preview and retains options when selection changes', async () => {
+    syncUpstreamModelsPreview.mockResolvedValue({ models: ['wan3.0', 'seedance2.0'] })
+    const credentials = {
+      platform: 'video_plugin', type: 'apikey', api_key: 'test-provider-key',
+      base_url: 'http://video-plugin:8081', plugin_token: 'test-plugin-token',
+      provider_protocol: 'waninter', provider_base_url: 'https://api.waninter.com',
+      provider_create_path: '/v1/videos/generations', provider_status_path: '/v1/videos/{id}',
+      provider_content_path: '/v1/videos/{id}/content', provider_models_path: '/v1/models'
+    }
+    const wrapper = mountSelector({ platform: 'video_plugin', syncCredentials: credentials })
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.syncUpstreamModels')!.trigger('click')
+    await flushPromises()
+
+    expect(syncUpstreamModelsPreview).toHaveBeenCalledWith(credentials)
+    expect(wrapper.emitted('upstream-synced')).toEqual([[]])
+    await wrapper.setProps({ modelValue: ['wan3.0'], syncCredentials: { ...credentials, model_mapping: { 'wan3.0': 'wan3.0' } } })
+    await wrapper.get('div.cursor-pointer').trigger('click')
+    expect(findModelRow(wrapper, 'seedance2.0').exists()).toBe(true)
+  })
+
+  it('keeps saved video models available for reselection before any sync', async () => {
+    const wrapper = mountSelector({ platform: 'video_plugin', accountId: 270, modelValue: ['wan3.0'] })
+    await wrapper.setProps({ modelValue: [] })
+    await wrapper.get('div.cursor-pointer').trigger('click')
+    await findModelRow(wrapper, 'wan3.0').get('[data-testid="select-model"]').trigger('click')
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['wan3.0']]])
+  })
+
+  it.each([{ models: [] }, new Error('Provider unavailable')])('preserves a video whitelist when sync returns %s', async result => {
+    if (result instanceof Error) syncUpstreamModels.mockRejectedValue(result)
+    else syncUpstreamModels.mockResolvedValue(result)
+    const wrapper = mountSelector({ platform: 'video_plugin', accountId: 270, modelValue: ['wan3.0'] })
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.syncUpstreamModels')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(wrapper.props('modelValue')).toEqual(['wan3.0'])
+  })
+
+  it('clears downloaded video options when switching accounts', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: ['provider-a-model'] })
+    const wrapper = mountSelector({ platform: 'video_plugin', accountId: 270 })
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.syncUpstreamModels')!.trigger('click')
+    await flushPromises()
+    await wrapper.setProps({ accountId: 271, modelValue: ['provider-b-model'] })
+    await wrapper.get('div.cursor-pointer').trigger('click')
+    expect(wrapper.findAll('[data-testid="model-option"]').map(row => row.text())).toEqual(['provider-b-model'])
+  })
+
+  it('ignores a pending video sync response after switching accounts', async () => {
+    let finish!: (result: { models: string[] }) => void
+    syncUpstreamModels.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    const wrapper = mountSelector({ platform: 'video_plugin', accountId: 270 })
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.syncUpstreamModels')!.trigger('click')
+    await wrapper.setProps({ accountId: 271, modelValue: ['provider-b-model'] })
+    finish({ models: ['provider-a-model'] })
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(showSuccess).not.toHaveBeenCalled()
+  })
 
   it.each(['typesafe', 'unregistered'])(
     'hides upstream sync for unsupported %s saved accounts and creation previews',

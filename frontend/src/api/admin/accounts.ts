@@ -646,6 +646,13 @@ export interface SyncUpstreamPreviewParams {
   type: string
   base_url?: string
   api_key: string
+  plugin_token?: string
+  provider_protocol?: string
+  provider_base_url?: string
+  provider_create_path?: string
+  provider_status_path?: string
+  provider_content_path?: string
+  provider_models_path?: string
   model_mapping?: Record<string, string>
 }
 

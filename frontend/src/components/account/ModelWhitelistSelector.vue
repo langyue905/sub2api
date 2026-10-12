@@ -95,6 +95,7 @@
     <!-- Quick Actions -->
     <div class="mb-4 flex flex-wrap gap-2">
       <button
+        v-if="!isVideoPlatform"
         type="button"
         @click="fillRelated"
         class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
@@ -145,7 +146,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { accountsAPI } from '@/api/admin/accounts'
@@ -164,20 +165,7 @@ const props = defineProps<{
   platform?: string
   platforms?: string[]
   accountId?: number
-  syncCredentials?: {
-    platform: string
-    type: string
-    base_url?: string
-    api_key: string
-    plugin_token?: string
-    provider_protocol?: string
-    provider_base_url?: string
-    provider_create_path?: string
-    provider_status_path?: string
-    provider_content_path?: string
-    provider_models_path?: string
-    model_mapping?: Record<string, string>
-  }
+  syncCredentials?: SyncUpstreamPreviewParams
 }>()
 
 const emit = defineEmits<{
@@ -193,6 +181,8 @@ const searchQuery = ref('')
 const customModel = ref('')
 const isComposing = ref(false)
 const isSyncingUpstream = ref(false)
+const videoModelOptions = ref<string[]>([])
+let syncContextVersion = 0
 const normalizedPlatforms = computed(() => {
   const rawPlatforms =
     props.platforms && props.platforms.length > 0
@@ -204,10 +194,36 @@ const normalizedPlatforms = computed(() => {
   return Array.from(
     new Set(
       rawPlatforms
-        .map(platform => platform?.trim())
+        .map(platform => platform?.trim().toLowerCase())
         .filter((platform): platform is string => Boolean(platform))
     )
   )
+})
+
+const isVideoPlatform = computed(() => normalizedPlatforms.value.includes('video_plugin'))
+
+watch(
+  [() => props.accountId, normalizedPlatforms, () => {
+    const credentials = props.syncCredentials
+    return JSON.stringify(credentials && [
+      credentials.platform, credentials.type, credentials.base_url, credentials.api_key,
+      credentials.plugin_token, credentials.provider_protocol, credentials.provider_base_url,
+      credentials.provider_create_path, credentials.provider_status_path,
+      credentials.provider_content_path, credentials.provider_models_path
+    ])
+  }],
+  () => {
+    syncContextVersion += 1
+    videoModelOptions.value = [...props.modelValue]
+  },
+  { immediate: true }
+)
+
+// Keep known video IDs selectable after the user removes them from the whitelist.
+watch(() => props.modelValue, models => {
+  if (isVideoPlatform.value) {
+    videoModelOptions.value = [...new Set([...videoModelOptions.value, ...models])]
+  }
 })
 
 const canSyncUpstream = computed(() => {
@@ -233,7 +249,17 @@ const availableOptions = computed(() => {
     }
   }
 
-  return allModels.filter(model => allowedModels.has(model.value))
+  const options = allModels.filter(model => allowedModels.has(model.value))
+  if (isVideoPlatform.value) {
+    const existing = new Set(options.map(model => model.value))
+    for (const model of videoModelOptions.value) {
+      if (!existing.has(model)) {
+        options.push({ value: model, label: model })
+        existing.add(model)
+      }
+    }
+  }
+  return options
 })
 
 const filteredModels = computed(() => {
@@ -301,15 +327,18 @@ const syncUpstreamModels = async () => {
   if (isSyncingUpstream.value || !canSyncUpstream.value) return
 
   isSyncingUpstream.value = true
+  const contextVersion = syncContextVersion
   try {
     let result
     if (props.accountId) {
       result = await accountsAPI.syncUpstreamModels(props.accountId)
     } else if (props.syncCredentials) {
-      result = await accountsAPI.syncUpstreamModelsPreview(props.syncCredentials as SyncUpstreamPreviewParams)
+      result = await accountsAPI.syncUpstreamModelsPreview(props.syncCredentials)
     } else {
       return
     }
+
+    if (contextVersion !== syncContextVersion) return
 
     const upstreamModels = result.models.map(model => model.trim()).filter(Boolean)
     if (upstreamModels.length === 0) {
@@ -321,10 +350,10 @@ const syncUpstreamModels = async () => {
       emit('upstream-synced')
     }
 
-    const replaceWithUpstream = normalizedPlatforms.value.some(
-      platform => platform.toLowerCase() === 'video_plugin'
-    )
-    const newModels = replaceWithUpstream ? [] : [...props.modelValue]
+    if (isVideoPlatform.value) {
+      videoModelOptions.value = [...new Set(upstreamModels)]
+    }
+    const newModels = isVideoPlatform.value ? [] : [...props.modelValue]
     let addedCount = 0
     for (const model of upstreamModels) {
       if (!newModels.includes(model)) {
@@ -354,6 +383,7 @@ const syncUpstreamModels = async () => {
       appStore.showWarning(t('admin.accounts.syncUpstreamModelsMetadataPartial'))
     }
   } catch (error) {
+    if (contextVersion !== syncContextVersion) return
     const message = error instanceof Error ? error.message : t('admin.accounts.syncUpstreamModelsFailed')
     appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
   } finally {
