@@ -41,6 +41,9 @@ RUN --mount=type=cache,id=sub2api-pnpm-store,target=/root/.local/share/pnpm/stor
 # Copy only that subtree to keep the build dependency minimal.
 COPY frontend/ ./
 COPY docs/legal/ /app/docs/legal/
+RUN cd workbenches/infinite-canvas && npm ci --legacy-peer-deps && npm run typecheck && npm run build && \
+    rm -rf ../../public/playgrounds/canvas && mkdir -p ../../public/playgrounds/canvas && \
+    cp -a dist/. ../../public/playgrounds/canvas/
 RUN pnpm run build
 
 # -----------------------------------------------------------------------------

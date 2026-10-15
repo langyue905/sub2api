@@ -5,6 +5,7 @@ on:
     branches:
       - integration/v0.2.15-canvas-workbench
       - integration/v0.2.15-video-plugin
+      - codex/video-https-upstream-0216
     paths-ignore:
       - '**.md'
   workflow_dispatch:
@@ -18,7 +19,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Gateway and reference-media regression tests (no provider calls)
+        working-directory: backend
+        run: go test ./internal/service ./internal/server/routes ./internal/handler -run 'Test.*(Video|Grok|Composite|ModelPlaza)' -count=1
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: corepack enable && corepack prepare pnpm@9 --activate
+      - name: Account and billing UI regression tests
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/ModelWhitelistSelector.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts
+      - name: Canvas type check and production build
+        working-directory: frontend/workbenches/infinite-canvas
+        run: |
+          npm ci --legacy-peer-deps
+          npm run typecheck
+          npm run build
   image:
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
@@ -37,10 +66,10 @@ jobs:
         shell: bash
         run: |
           suffix="canvas"
-          version="0.2.15-zsh-canvas"
-          if [[ "$GITHUB_REF_NAME" == "integration/v0.2.15-video-plugin" ]]; then
+          version="$(cat backend/cmd/server/VERSION)-zsh-canvas"
+          if [[ "$GITHUB_REF_NAME" == "integration/v0.2.15-video-plugin" || "$GITHUB_REF_NAME" == "codex/video-https-upstream-0216" ]]; then
             suffix="video"
-            version="0.2.15-zsh-video"
+            version="$(cat backend/cmd/server/VERSION)-zsh-video"
           fi
           repository="ghcr.io/${GITHUB_REPOSITORY,,}"
           context="."

@@ -31,7 +31,7 @@ const (
 	temporaryVideoReferenceMaxBytes = int64(256 << 20)
 )
 
-var temporaryVideoReferenceNamePattern = regexp.MustCompile(`^[a-f0-9]{32}\.(?:png|jpg|webp|gif)$`)
+var temporaryVideoReferenceNamePattern = regexp.MustCompile(`^[a-f0-9]{32}\.(?:png|jpg|webp|gif|mp4|webm|mp3|wav|ogg|m4a)$`)
 
 const (
 	videoPluginProviderHeader     = "X-Sub2-Video-Upstream-Protocol"
@@ -164,7 +164,7 @@ func externalizeVideoPluginReferenceImages(c *gin.Context, cfg *config.Config, b
 	}
 	dir := temporaryVideoReferenceDir()
 	changed := false
-	for _, field := range []string{"image", "images", "reference_images"} {
+	for _, field := range []string{"image", "images", "reference_images", "videos", "audios", "reference_videos", "reference_audios", "video", "audio", "content"} {
 		value, ok := payload[field]
 		if !ok {
 			continue
@@ -291,12 +291,19 @@ func videoReferenceURL(value any) string {
 
 func videoPluginModelNeedsPublicReference(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
-	return strings.HasPrefix(model, "grok-") || strings.HasPrefix(model, "kling-")
+	return strings.HasPrefix(model, "grok-") || strings.HasPrefix(model, "kling-") || isSeedanceVideoModel(model)
 }
 
 func externalizeVideoReferenceValue(ctx context.Context, dir, publicBaseURL string, value any) (any, bool, error) {
 	switch item := value.(type) {
 	case string:
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(item)), "data:audio/") || strings.HasPrefix(strings.ToLower(strings.TrimSpace(item)), "data:video/") {
+			name, err := saveTemporaryVideoMediaDataURL(ctx, dir, strings.TrimSpace(item))
+			if err != nil {
+				return nil, false, err
+			}
+			return strings.TrimRight(publicBaseURL, "/") + "/v1/video-references/" + name, true, nil
+		}
 		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(item)), "data:image/") {
 			return value, false, nil
 		}
@@ -332,7 +339,7 @@ func externalizeVideoReferenceValue(ctx context.Context, dir, publicBaseURL stri
 			next := entry
 			entryChanged := false
 			var err error
-			if key == "url" || key == "image_url" {
+			if key == "url" || key == "image_url" || key == "video_url" || key == "audio_url" {
 				next, entryChanged, err = externalizeVideoReferenceValue(ctx, dir, publicBaseURL, entry)
 			}
 			if err != nil {
@@ -380,6 +387,8 @@ func temporaryVideoReferenceDir() string {
 }
 
 func saveTemporaryVideoReference(_ context.Context, dir, contentType string, data []byte) (string, error) {
+	temporaryVideoReferenceMu.Lock()
+	defer temporaryVideoReferenceMu.Unlock()
 	if len(data) == 0 || int64(len(data)) > defaultImageMaxDownloadBytes {
 		return "", fmt.Errorf("temporary video reference has invalid size")
 	}

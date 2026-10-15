@@ -31,6 +31,7 @@ func RegisterGatewayRoutes(
 	cfg *config.Config,
 ) {
 	r.GET("/v1/video-references/:token", service.ServeTemporaryVideoReference)
+	r.POST("/v1/video-references", gin.HandlerFunc(apiKeyAuth), service.NewVideoReferenceUploadHandler(cfg))
 
 	bodyLimit := middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize)
 	textBodyLimit := middleware.RequestBodyLimit(cfg.Gateway.TextMaxBodySize)

@@ -2,8 +2,9 @@ import axios from "axios";
 
 import i18n from "@/i18n";
 import { clampVideoSeconds, inferVideoRatio, parseVideoResolution } from "@/lib/media-size";
-import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
-import { imageToDataUrl } from "@/services/image-storage";
+import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { getImageBlob, imageToDataUrl } from "@/services/image-storage";
+import { assertAllowedMediaDownloadUrl } from "@/services/media-url-policy";
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -98,12 +99,16 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 }
 
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
-    if (options?.videos?.length) throw new Error(apiText("invalidReferenceVideo"));
-    if (options?.audios?.length) throw new Error(apiText("invalidReferenceAudio"));
-    const imageUrls = await Promise.all(references.map((image) => imageToDataUrl(image, { signal: options?.signal })));
-    if (imageUrls.some((url) => !url.startsWith("data:image/"))) throw new Error(apiText("referenceImageReadFailed"));
+    const seedance = /^(doubao-)?seedance-/i.test(modelOptionName(model));
+    if (!seedance && options?.videos?.length) throw new Error(apiText("invalidReferenceVideo"));
+    if (!seedance && options?.audios?.length) throw new Error(apiText("invalidReferenceAudio"));
+    const imageUrls: string[] = [];
+    for (const image of references) {
+        imageUrls.push(seedance ? await uploadVideoReference(config, image, "image", options) : await imageToDataUrl(image, { signal: options?.signal }));
+    }
+    if (!seedance && imageUrls.some((url) => !url.startsWith("data:image/"))) throw new Error(apiText("referenceImageReadFailed"));
 
-    // Sub2API forwards this JSON body to xAI's canonical Grok video endpoint.
+    // The gateway adapter translates this stable contract for the selected provider.
     const body: Record<string, unknown> = {
         model: modelOptionName(model),
         prompt,
@@ -114,6 +119,14 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     if (aspectRatio !== "auto") body.aspect_ratio = aspectRatio;
     if (imageUrls.length === 1) body.image = { url: imageUrls[0] };
     if (imageUrls.length > 1) body.reference_images = imageUrls.map((url) => ({ url }));
+    if (seedance) {
+        const videos: string[] = [];
+        const audios: string[] = [];
+        for (const video of options?.videos || []) videos.push(await uploadVideoReference(config, video, "video", options));
+        for (const audio of options?.audios || []) audios.push(await uploadVideoReference(config, audio, "audio", options));
+        if (videos.length) body.videos = videos;
+        if (audios.length) body.audios = audios;
+    }
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos/generations"), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
         const id = videoTaskId(created);
@@ -122,6 +135,31 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     } catch (error) {
         if (axios.isCancel(error) || options?.signal?.aborted) throw error;
         throw new Error(readAxiosError(error, apiText("videoTaskCreateFailed")));
+    }
+}
+
+async function uploadVideoReference(config: AiConfig, reference: { url?: string; dataUrl?: string; storageKey?: string }, kind: "image" | "video" | "audio", options?: RequestOptions): Promise<string> {
+    options?.signal?.throwIfAborted();
+    const stored = reference.storageKey ? await (kind === "image" ? getImageBlob(reference.storageKey) : getMediaBlob(reference.storageKey)) : null;
+    let blob = stored;
+    if (!blob) {
+        const source = reference.dataUrl || reference.url || "";
+        if (/^https:\/\//i.test(source)) return source;
+        assertAllowedMediaDownloadUrl(source);
+        const response = await fetch(source, { signal: options?.signal });
+        if (!response.ok) throw new Error("参考素材读取失败，请重新上传。");
+        blob = await response.blob();
+    }
+    if (!blob.size || blob.size > 32 * 1024 * 1024) throw new Error("参考素材不能为空，单个文件最大 32 MiB。");
+    const form = new FormData();
+    form.append("file", blob, "reference");
+    try {
+        const { data } = await axios.post<{ url: string }>(aiApiUrl(config, "/video-references"), form, { headers: aiHeaders(config), signal: options?.signal });
+        if (!/^https:\/\//i.test(data.url || "")) throw new Error("参考素材上传后未返回 HTTPS 地址。");
+        return data.url;
+    } catch (error) {
+        if (axios.isCancel(error) || options?.signal?.aborted) throw error;
+        throw new Error(readAxiosError(error, "参考素材上传失败。"));
     }
 }
 
