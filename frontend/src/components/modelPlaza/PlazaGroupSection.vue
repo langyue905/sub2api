@@ -52,7 +52,10 @@
     </header>
 
     <!-- 模型价格表:整行(含 hover 底色/分区底色)顶到卡片边缘,左右留白由表格首列/末列的 padding 提供 -->
-    <div>
+    <div v-if="view === 'cards' && group.models.length" class="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      <PlazaModelCard v-for="m in group.models" :key="m.platform + ':' + m.name" :model="m" :group="group" @select="selectedModel = $event" />
+    </div>
+    <div v-else>
       <PlazaModelPricingTable
         v-if="group.models.length > 0"
         :models="group.models"
@@ -65,21 +68,25 @@
         :video-rate-multiplier="group.video_rate_multiplier"
         :peak-window="peakWindow"
         :peak-rate-multiplier="group.peak_rate_multiplier"
+        @select="selectedModel = $event"
       />
       <p v-else class="px-5 py-4 text-center text-sm text-gray-400 dark:text-dark-500">
         {{ t('modelPlaza.detail.noModels') }}
       </p>
     </div>
+    <PlazaModelDetail :model="selectedModel" :group="group" :peak-window="peakWindow" @close="selectedModel = null" />
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import PlazaModelPricingTable from './PlazaModelPricingTable.vue'
-import type { ModelPlazaGroup } from '@/api/modelPlaza'
+import PlazaModelCard from './PlazaModelCard.vue'
+import PlazaModelDetail from './PlazaModelDetail.vue'
+import type { ModelPlazaGroup, PlazaModel } from '@/api/modelPlaza'
 import type { GroupPlatform, SubscriptionType } from '@/types'
 import { platformBorderStrongClass } from '@/utils/platformColors'
 import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
@@ -87,10 +94,15 @@ import { useAppStore } from '@/stores/app'
 
 const props = defineProps<{
   group: ModelPlazaGroup
+  view?: 'cards' | 'table'
 }>()
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const selectedModel = ref<PlazaModel | null>(null)
+watch(() => props.group.models, models => {
+  if (selectedModel.value) selectedModel.value = models.find(m => m.name === selectedModel.value?.name && m.platform === selectedModel.value?.platform) || null
+})
 
 /** 高峰窗口描述(含倍率与服务器时区标注);分组未启用高峰为空串。 */
 const peakWindow = computed(() => {

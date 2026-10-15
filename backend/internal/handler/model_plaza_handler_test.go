@@ -26,6 +26,24 @@ func plazaGroups() []service.PlazaGroup {
 	}
 }
 
+func TestModelPlazaProfiles_OnlyVisibleModelsAndPlatformOverrides(t *testing.T) {
+	groups := []modelPlazaGroup{{Models: []modelPlazaModel{
+		{Name: "same", Platform: "openai"}, {Name: "same", Platform: "anthropic"}, {Name: "other", Platform: "openai"},
+	}}}
+	profiles := []service.ModelPlazaProfile{
+		{Model: "same", Summary: "shared"},
+		{Model: "same", Platform: "openai", Summary: "openai only"},
+		{Model: "hidden", Summary: "must not leak"},
+	}
+	applyModelPlazaProfiles(groups, profiles)
+	require.Equal(t, "openai only", groups[0].Models[0].Profile.Summary)
+	require.Equal(t, "shared", groups[0].Models[1].Profile.Summary)
+	require.Nil(t, groups[0].Models[2].Profile)
+	raw, err := json.Marshal(groups)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "must not leak")
+}
+
 func TestFilterPlazaVisibleGroups_AnonymousSeesOnlyNonExclusive(t *testing.T) {
 	// 匿名(allowedExclusive == nil):仅非专属分组;订阅型公开分组照常可见(橱窗语义)。
 	visible := filterPlazaVisibleGroups(plazaGroups(), nil, false)

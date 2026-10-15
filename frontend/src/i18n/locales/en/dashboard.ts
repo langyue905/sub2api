@@ -662,7 +662,7 @@ export default {
       groupLabel: 'Group',
       rateLabel: 'Rate',
       modelLabel: 'Model',
-      searchPlaceholder: 'Search models',
+      searchPlaceholder: 'Search model names, summaries or tags',
       all: 'All'
     },
     badges: {
@@ -700,10 +700,26 @@ export default {
       officialPrice: 'Official Price',
       rate: 'Rate',
       unitPerMillion: '$ / 1M tokens',
+      perUnitSecond: '/ second',
+      perSecond: 'Per second',
       perUnitRequest: '/ request',
       perUnitImage: '/ image',
       perRequest: 'Per request',
       perImage: 'Per image'
+    },
+    cards: {
+      perMillion: '/ 1M tokens',
+      noSummary: 'No model description yet',
+      basePrice: 'Discounted standard-period price',
+      tier: 'Tier {n}',
+      timePricing: 'Prices vary during some periods; see the full price table',
+      viewDetails: 'View details',
+      tokenModel: 'Token billing',
+      pricingDetails: 'Full pricing and official reference prices',
+      count: '{n} models across groups',
+      viewLabel: 'Display mode',
+      cards: 'Model cards',
+      table: 'Price table'
     },
     nav: {
       login: 'Sign In',

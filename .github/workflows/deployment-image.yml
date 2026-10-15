@@ -34,6 +34,9 @@ jobs:
       - name: Video plugin regression tests (mock providers only)
         working-directory: plugins/video-volcengine
         run: go test ./...
+      - name: Model plaza and settings unit tests
+        working-directory: backend
+        run: go test -tags unit ./internal/service ./internal/handler ./internal/handler/admin -run 'Test.*ModelPlaza|Test.*Plaza|Test.*Settings' -count=1
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -44,6 +47,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/ModelWhitelistSelector.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts
           pnpm exec vitest run --config vitest.video.config.ts
+          pnpm exec vitest run src/components/modelPlaza/__tests__ src/i18n/__tests__/localeKeyCompleteness.spec.ts
       - name: Canvas type check and production build
         working-directory: frontend/workbenches/infinite-canvas
         run: |

@@ -49,8 +49,14 @@
       />
 
       <!-- 分组分节的模型清单(默认按生效倍率升序) -->
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('modelPlaza.cards.count', { n: filteredGroups.reduce((n, g) => n + g.models.length, 0) }) }}</p>
+        <div class="inline-flex rounded-xl border border-gray-200 bg-white p-1 dark:border-dark-700 dark:bg-dark-800" role="group" :aria-label="t('modelPlaza.cards.viewLabel')">
+          <button v-for="mode in (['cards', 'table'] as const)" :key="mode" type="button" class="rounded-lg px-3 py-1.5 text-xs font-medium" :class="view === mode ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-dark-700'" :aria-pressed="view === mode" @click="view = mode">{{ t('modelPlaza.cards.' + mode) }}</button>
+        </div>
+      </div>
       <div v-if="filteredGroups.length > 0" class="space-y-5">
-        <PlazaGroupSection v-for="g in filteredGroups" :key="g.id" :group="g" />
+        <PlazaGroupSection v-for="g in filteredGroups" :key="g.id" :group="g" :view="view" />
       </div>
       <div
         v-else
@@ -89,6 +95,7 @@ const selectedPlatform = ref<string>('all')
 const selectedGroupId = ref<number | 'all'>('all')
 const selectedRate = ref<number | 'all'>('all')
 const searchQuery = ref('')
+const view = ref<'cards' | 'table'>('cards')
 
 const searchActive = computed(() => searchQuery.value.trim() !== '')
 
@@ -143,7 +150,9 @@ const filteredGroups = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   if (q) {
     groups = groups
-      .map((g) => ({ ...g, models: g.models.filter((m) => m.name.toLowerCase().includes(q)) }))
+      .map((g) => ({ ...g, models: g.models.filter((m) =>
+        [m.name, m.profile?.summary, ...(m.profile?.tags || [])].some(value => value?.toLowerCase().includes(q))
+      ) }))
       .filter((g) => g.models.length > 0)
   }
   // 专属倍率会改变生效值,不能只依赖后端按默认倍率的排序。

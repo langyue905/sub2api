@@ -43,6 +43,16 @@ export interface PlazaTimePricing {
   periods: PlazaTimePricingPeriod[]
 }
 
+export interface PlazaModelProfile {
+  model: string
+  platform?: string
+  summary: string
+  description: string
+  cover_url?: string
+  tags: string[]
+  specs: { label: string; value: string }[]
+}
+
 export interface PlazaModel {
   name: string
   platform: string
@@ -53,6 +63,7 @@ export interface PlazaModel {
   long_context_basis?: PlazaLongContextBasis
   /** 仅配置了分时倍率的模型返回。 */
   time_pricing?: PlazaTimePricing
+  profile?: PlazaModelProfile
 }
 
 export interface ModelPlazaGroup {

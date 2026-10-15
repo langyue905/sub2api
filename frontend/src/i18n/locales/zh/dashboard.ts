@@ -667,7 +667,7 @@ export default {
       groupLabel: '分组',
       rateLabel: '倍率',
       modelLabel: '模型',
-      searchPlaceholder: '搜索模型名称',
+      searchPlaceholder: '搜索模型名称、简介或标签',
       all: '全部'
     },
     badges: {
@@ -704,10 +704,26 @@ export default {
       officialPrice: '官方价格',
       rate: '折扣倍率',
       unitPerMillion: '$ / 1M token',
+      perUnitSecond: '/ 秒',
+      perSecond: '按秒计费',
       perUnitRequest: '/ 次',
       perUnitImage: '/ 张',
       perRequest: '按次计费',
       perImage: '按图片计费'
+    },
+    cards: {
+      perMillion: '/ 百万 Token',
+      noSummary: '暂无模型介绍',
+      basePrice: '标准时段折后价',
+      tier: '档位 {n}',
+      timePricing: '部分时段价格有所调整，详见完整价格表',
+      viewDetails: '查看详情',
+      tokenModel: 'Token 计费',
+      pricingDetails: '完整价格与官方参考价',
+      count: '共 {n} 个模型（含各分组）',
+      viewLabel: '展示方式',
+      cards: '模型卡片',
+      table: '价格表'
     },
     nav: {
       login: '登录',

@@ -71,7 +71,8 @@ type modelPlazaModel struct {
 	// LongContextBasis 多档时的计价基准："whole_request"（整单按档）| "marginal"（仅超出部分）。
 	LongContextBasis string `json:"long_context_basis,omitempty"`
 	// TimePricing 分时倍率时段，落在时段内的请求整单乘倍率；无分时省略。
-	TimePricing *modelPlazaTimePricing `json:"time_pricing,omitempty"`
+	TimePricing *modelPlazaTimePricing     `json:"time_pricing,omitempty"`
+	Profile     *service.ModelPlazaProfile `json:"profile,omitempty"`
 }
 
 // modelPlazaGroup 广场分组条目（白名单字段）。
@@ -155,10 +156,29 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 	// 追加而非覆盖：CORS 中间件已为具体来源写入 Vary: Origin。
 	c.Writer.Header().Add("Vary", "Accept-Language")
 	out := toLocalizedModelPlazaGroups(visible, userRates, c.GetHeader("Accept-Language"))
+	applyModelPlazaProfiles(out, rt.Profiles)
 	response.Success(c, modelPlazaResponse{
 		Description: rt.Description,
 		Groups:      out,
 	})
+}
+
+// Only attach profiles to models already admitted by the group visibility filter.
+func applyModelPlazaProfiles(groups []modelPlazaGroup, profiles []service.ModelPlazaProfile) {
+	byModel := make(map[string]*service.ModelPlazaProfile, len(profiles))
+	for i := range profiles {
+		p := &profiles[i]
+		byModel[p.Platform+"\x00"+p.Model] = p
+	}
+	for i := range groups {
+		for j := range groups[i].Models {
+			m := &groups[i].Models[j]
+			m.Profile = byModel[m.Platform+"\x00"+m.Name]
+			if m.Profile == nil {
+				m.Profile = byModel["\x00"+m.Name]
+			}
+		}
+	}
 }
 
 // filterPlazaVisibleGroups 按登录态裁剪分组可见性。

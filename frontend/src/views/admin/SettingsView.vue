@@ -7373,6 +7373,7 @@
                 class="input font-mono text-sm"
               ></textarea>
             </div>
+            <ModelPlazaProfilesEditor v-if="form.model_plaza_enabled" v-model="form.model_plaza_profiles" />
           </div>
         </div>
 
@@ -9028,6 +9029,8 @@ import PaymentProviderDialog from "@/components/payment/PaymentProviderDialog.vu
 import GroupBadge from "@/components/common/GroupBadge.vue";
 import GroupOptionItem from "@/components/common/GroupOptionItem.vue";
 import Toggle from "@/components/common/Toggle.vue";
+import ModelPlazaProfilesEditor from "@/components/admin/ModelPlazaProfilesEditor.vue";
+import type { PlazaModelProfile } from "@/api/modelPlaza";
 import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
@@ -10063,6 +10066,7 @@ const form = reactive<SettingsForm>({
   model_plaza_enabled: false,
   model_plaza_require_auth: false,
   model_plaza_description: '',
+  model_plaza_profiles: [] as PlazaModelProfile[],
   // Plugin management menu visibility; plugin runtime is unaffected.
   plugin_management_enabled: false,
   // Affiliate (邀请返利) feature switch
@@ -11798,6 +11802,7 @@ async function saveSettings() {
       model_plaza_enabled: form.model_plaza_enabled,
       model_plaza_require_auth: form.model_plaza_require_auth,
       model_plaza_description: form.model_plaza_description,
+      model_plaza_profiles: form.model_plaza_profiles,
       plugin_management_enabled: form.plugin_management_enabled,
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,

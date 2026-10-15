@@ -22,6 +22,19 @@
       </div>
 
       <!-- 右:登录 / 回到后台 -->
+      <nav class="flex shrink-0 items-center gap-2">
+        <a
+          v-if="docUrl"
+          :href="docUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-dark-300 dark:hover:bg-dark-800"
+          :title="t('nav.docs')"
+          :aria-label="t('nav.docs')"
+        >
+          <Icon name="book" size="sm" />
+          <span class="hidden sm:inline">{{ t('nav.docs') }}</span>
+        </a>
       <RouterLink
         v-if="isAuthenticated"
         :to="backTarget"
@@ -36,6 +49,7 @@
       >
         {{ t('modelPlaza.nav.login') }}
       </RouterLink>
+      </nav>
     </div>
   </header>
 </template>
@@ -46,12 +60,14 @@ import { useI18n } from 'vue-i18n'
 import { sanitizeUrl } from '@/utils/url'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 
 const settings = computed(() => appStore.cachedPublicSettings)
+const docUrl = computed(() => sanitizeUrl(appStore.docUrl))
 const siteName = computed(() => settings.value?.site_name || 'Sub2API')
 const siteLogo = computed(() =>
   sanitizeUrl(settings.value?.site_logo || '', { allowRelative: true, allowDataUrl: true })
