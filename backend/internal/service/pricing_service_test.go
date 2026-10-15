@@ -613,10 +613,10 @@ func TestBillingService_Gemini36FlashThinkingTierFallbacksAreBillable(t *testing
 		t.Run(model, func(t *testing.T) {
 			cost, err := svc.CalculateCost(model, tokens, 1)
 			require.NoError(t, err)
-			require.InDelta(t, 1.5, cost.InputCost, 1e-12)
-			require.InDelta(t, 7.5, cost.OutputCost, 1e-12)
-			require.InDelta(t, 0.15, cost.CacheReadCost, 1e-12)
-			require.InDelta(t, 9.15, cost.TotalCost, 1e-12)
+			require.InDelta(t, 0.75, cost.InputCost, 1e-12)
+			require.InDelta(t, 3.75, cost.OutputCost, 1e-12)
+			require.InDelta(t, 0.075, cost.CacheReadCost, 1e-12)
+			require.InDelta(t, 4.575, cost.TotalCost, 1e-12)
 		})
 	}
 }
@@ -725,11 +725,98 @@ func TestDefaultPricingIncludesGemini36FlashRates(t *testing.T) {
 		t.Run(model, func(t *testing.T) {
 			pricing, err := billingSvc.GetModelPricing(model)
 			require.NoError(t, err)
-			require.InDelta(t, 1.5e-6, pricing.InputPricePerToken, 1e-12)
-			require.InDelta(t, 7.5e-6, pricing.OutputPricePerToken, 1e-12)
-			require.InDelta(t, 0.15e-6, pricing.CacheReadPricePerToken, 1e-12)
+			require.InDelta(t, 0.75e-6, pricing.InputPricePerToken, 1e-12)
+			require.InDelta(t, 3.75e-6, pricing.OutputPricePerToken, 1e-12)
+			require.InDelta(t, 0.075e-6, pricing.CacheReadPricePerToken, 1e-12)
 		})
 	}
+}
+
+func TestPricingService_Gemini4ArgonThinkingTiersUseBasePricing(t *testing.T) {
+	basePricing := &LiteLLMModelPricing{InputCostPerToken: 2e-6, OutputCostPerToken: 10e-6, CacheReadInputTokenCost: 0.1e-6}
+	cyberPricing := &LiteLLMModelPricing{InputCostPerToken: 4e-6, OutputCostPerToken: 20e-6, CacheReadInputTokenCost: 0.2e-6}
+	svc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"gemini-4-argon":                  basePricing,
+		"gemini-4-argon-cyber-permissive": cyberPricing,
+	}}
+
+	for _, model := range []string{
+		"gemini-4-argon",
+		"gemini-4-argon-high",
+		"gemini-4-argon-low",
+		"gemini-4-argon-medium",
+		"models/gemini-4-argon-high",
+		"projects/p/locations/global/publishers/google/models/gemini-4-argon",
+	} {
+		t.Run(model, func(t *testing.T) {
+			require.Same(t, basePricing, svc.GetModelPricing(model))
+		})
+	}
+	require.Same(t, cyberPricing, svc.GetModelPricing("gemini-4-argon-cyber-permissive"))
+}
+
+func TestBillingService_Gemini4ArgonFallbacksAreBillable(t *testing.T) {
+	svc := NewBillingService(&config.Config{}, nil)
+	tokens := UsageTokens{InputTokens: 1_000_000, OutputTokens: 1_000_000, CacheReadTokens: 1_000_000}
+
+	for _, tc := range []struct {
+		model               string
+		input, output, read float64
+	}{
+		{"gemini-4-argon", 2, 10, 0.1},
+		{"gemini-4-argon-high", 2, 10, 0.1},
+		{"gemini-4-argon-low", 2, 10, 0.1},
+		{"gemini-4-argon-medium", 2, 10, 0.1},
+		{"models/gemini-4-argon", 2, 10, 0.1},
+		{"gemini-4-argon-cyber-permissive", 4, 20, 0.2},
+		{"gemini-4-argon-cyber", 4, 20, 0.2},
+		{"publishers/google/models/gemini-4-argon-cyber-permissive", 4, 20, 0.2},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			cost, err := svc.CalculateCost(tc.model, tokens, 1)
+			require.NoError(t, err)
+			require.InDelta(t, tc.input, cost.InputCost, 1e-12)
+			require.InDelta(t, tc.output, cost.OutputCost, 1e-12)
+			require.InDelta(t, tc.read, cost.CacheReadCost, 1e-12)
+			require.InDelta(t, tc.input+tc.output+tc.read, cost.TotalCost, 1e-12)
+		})
+	}
+}
+
+func TestDefaultPricingIncludesGemini4ArgonRates(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
+	require.NoError(t, err)
+
+	pricingSvc := &PricingService{}
+	pricingData, err := pricingSvc.parsePricingData(data)
+	require.NoError(t, err)
+	pricingSvc.pricingData = pricingData
+
+	for _, tc := range []struct {
+		model               string
+		provider            string
+		input, output, read float64
+	}{
+		{"gemini-4-argon", "gemini", 2e-6, 10e-6, 0.1e-6},
+		{"gemini-4-argon-high", "gemini", 2e-6, 10e-6, 0.1e-6},
+		{"gemini-4-argon-cyber-permissive", "vertex_ai-language-models", 4e-6, 20e-6, 0.2e-6},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			pricing := pricingSvc.GetModelPricing(tc.model)
+			require.NotNil(t, pricing)
+			require.Equal(t, tc.provider, pricing.LiteLLMProvider)
+			require.InDelta(t, tc.input, pricing.InputCostPerToken, 1e-15)
+			require.InDelta(t, tc.output, pricing.OutputCostPerToken, 1e-15)
+			require.InDelta(t, tc.read, pricing.CacheReadInputTokenCost, 1e-15)
+			// Priority 档为标准价的 1.8 倍；单一价档不分提示词长度，显式缓存不可用故无存储价。
+			require.InDelta(t, tc.input*1.8, pricing.InputCostPerTokenPriority, 1e-15)
+			require.InDelta(t, tc.output*1.8, pricing.OutputCostPerTokenPriority, 1e-15)
+			require.InDelta(t, tc.read*1.8, pricing.CacheReadInputTokenCostPriority, 1e-15)
+			require.Zero(t, pricing.LongContextInputTokenThreshold)
+			require.Zero(t, pricing.CacheStorageCostPerTokenPerHour)
+		})
+	}
+	require.Contains(t, pricingSvc.ListModelNamesByProvider("gemini"), "gemini-4-argon")
 }
 
 func TestDefaultPricingUsesCurrentCodexAutoReviewBaseRates(t *testing.T) {
