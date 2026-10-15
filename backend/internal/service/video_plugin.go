@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -135,6 +136,19 @@ func (s *OpenAIGatewayService) ForwardVideoPlugin(
 
 	responseBody, responseHeaders, err := s.doVideoPluginJSONRequest(ctx, c, account, apiKey, baseURL, endpoint, requestID, body)
 	if err != nil {
+		// Zhiqi queues creates durably. A failed response cannot establish that
+		// the task was rejected; another POST could generate and charge twice.
+		providerURL, parseErr := url.Parse(account.GetCredential("provider_base_url"))
+		if endpoint == GrokMediaEndpointVideosGenerations && parseErr == nil &&
+			(strings.EqualFold(providerURL.Hostname(), "zhiqiapi.com") || strings.HasSuffix(strings.ToLower(providerURL.Hostname()), ".zhiqiapi.com")) {
+			var failoverErr *UpstreamFailoverError
+			if errors.As(err, &failoverErr) {
+				stopped := *failoverErr
+				stopped.NextAccountAction = NextAccountStop
+				stopped.RetryableOnSameAccount = false
+				return nil, &stopped
+			}
+		}
 		return nil, err
 	}
 	usage := videoPluginUsageFromResponse(endpoint, requestInfo, responseBody)

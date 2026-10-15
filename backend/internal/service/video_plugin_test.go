@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +23,53 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+type videoPluginCreateUpstream struct {
+	HTTPUpstream
+	response string
+	err      error
+	calls    int
+}
+
+func (u *videoPluginCreateUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.calls++
+	if u.err != nil {
+		return nil, u.err
+	}
+	return &http.Response{StatusCode: http.StatusBadGateway, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(u.response))}, nil
+}
+
+func TestVideoPluginZhiqiCreateDoesNotRetryUncertainSubmission(t *testing.T) {
+	for _, provider := range []string{"https://zhiqiapi.com", "https://api.zhiqiapi.com/v1", "https://other.example.com", "https://zhiqiapi.com.example.com"} {
+		for _, lookup := range []bool{false, true} {
+			for _, transport := range []bool{false, true} {
+				t.Run(provider+"/lookup="+strconv.FormatBool(lookup)+"/transport="+strconv.FormatBool(transport), func(t *testing.T) {
+					upstream := &videoPluginCreateUpstream{response: `{"error":{"message":"submission outcome unknown"}}`}
+					if transport {
+						upstream.err = errors.New("connection reset")
+					}
+					svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+					account := &Account{ID: 270, Platform: PlatformVideoPlugin, Type: AccountTypeAPIKey, Credentials: map[string]any{
+						"api_key": "test-key", "base_url": "http://video-plugin-test:8081", "provider_base_url": provider,
+					}}
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+					endpoint := GrokMediaEndpointVideosGenerations
+					if lookup {
+						endpoint = GrokMediaEndpointVideoStatus
+					}
+					_, err := svc.ForwardVideoPlugin(context.Background(), c, account, endpoint, "existing-task", []byte(`{"model":"test-video","prompt":"test"}`), "application/json")
+					var failover *UpstreamFailoverError
+					require.ErrorAs(t, err, &failover)
+					protected := !lookup && (provider == "https://zhiqiapi.com" || provider == "https://api.zhiqiapi.com/v1")
+					require.Equal(t, !protected, failover.ShouldRetryNextAccount())
+					require.False(t, failover.RetryableOnSameAccount)
+					require.Equal(t, 1, upstream.calls)
+				})
+			}
+		}
+	}
+}
 
 func TestValidateVideoPluginBaseURL(t *testing.T) {
 	tests := []struct {
