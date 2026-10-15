@@ -15,7 +15,8 @@ import { clampVideoSeconds } from "@/lib/media-size";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { deleteStoredMedia, resolveMediaUrl } from "@/services/file-storage";
 import { resolveImageUrl, ensureImagePreview, getImagePreviewRevision, previewUrlFor, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
-import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { createVideoGenerationTask, isVideoTaskFailed, waitForVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { canContinueVideoTask, shouldResumeVideoTask } from "@/services/video-task-history";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { boolConfig, modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -35,9 +36,10 @@ type GeneratedVideo = {
 
 type GenerationResult = {
     id: string;
-    status: "pending" | "success" | "failed" | "stopped";
+    status: "pending" | "success" | "failed" | "stopped" | "interrupted";
     video?: GeneratedVideo;
     error?: string;
+    progress?: string | number;
 };
 
 type GenerationLog = {
@@ -53,10 +55,11 @@ type GenerationLog = {
     size: string;
     resolution: string;
     seconds: string;
-    status: "pending" | "success" | "failed" | "stopped";
+    status: GenerationResult["status"];
     task?: VideoGenerationTask;
     video?: GeneratedVideo;
     error?: string;
+    failureSource?: "upstream";
 };
 
 type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode">;
@@ -67,7 +70,7 @@ const LOG_STORE_KEY = "infinite-canvas:video_generation_logs";
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
 
 export default function VideoPage() {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -188,10 +191,12 @@ export default function VideoPage() {
         const controller = new AbortController();
         creationControllerRef.current = controller;
         let handedToPolling = false;
+        let log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, durationMs: 0, status: "pending" });
         try {
+            // Persist before POST. Reloading an uncertain submission must never POST again.
+            await saveLog(log, false);
             const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, { signal: controller.signal });
-            throwIfAborted(controller.signal);
-            const log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, durationMs: 0, status: "pending", task });
+            log = { ...log, task };
             await saveLog(log, false);
             throwIfAborted(controller.signal);
             handedToPolling = true;
@@ -200,15 +205,16 @@ export default function VideoPage() {
             if (controller.signal.aborted) {
                 if (!mountedRef.current) return;
                 const errorMessage = localStopMessage();
-                setResults([{ id: nanoid(), status: "stopped", error: errorMessage }]);
-                await saveLog(buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, durationMs: performance.now() - batchStartedAt, status: "stopped", error: errorMessage }));
+                setResults([{ id: log.id, status: "stopped", error: errorMessage }]);
+                await saveLog({ ...log, durationMs: performance.now() - batchStartedAt, status: "stopped", error: errorMessage }, false, true);
                 setRunning(false);
                 setStartedAt(0);
                 return;
             }
             const errorMessage = error instanceof Error ? error.message : t("workbench.generationFailed");
-            setResults([{ id: nanoid(), status: "failed", error: errorMessage }]);
-            await saveLog(buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, durationMs: performance.now() - batchStartedAt, status: "failed", error: errorMessage }));
+            const status = log.task || (error instanceof Error && error.name === "VideoSubmissionUncertain") ? "interrupted" : "failed";
+            setResults([{ id: log.id, status, error: errorMessage }]);
+            await saveLog({ ...log, durationMs: performance.now() - batchStartedAt, status, error: errorMessage }, false, true);
             message.error(errorMessage);
             setRunning(false);
             setStartedAt(0);
@@ -232,7 +238,13 @@ export default function VideoPage() {
     };
 
     const retryResult = () => {
-        void generate();
+        modal.confirm({
+            title: videoText("创建新视频任务？", "Create a new video task?"),
+            content: videoText("重新生成会创建新任务，可能再次计费。若原任务仍在处理，请使用“继续查询”。", "A new task may incur another charge. Use Continue querying if the original task is still processing."),
+            okText: videoText("重新生成", "Generate again"),
+            cancelText: t("common.cancel"),
+            onOk: () => { void generate(); },
+        });
     };
 
     const stopWaiting = () => {
@@ -291,9 +303,15 @@ export default function VideoPage() {
         setDeleteConfirmOpen(false);
     };
 
-    const saveLog = async (log: GenerationLog, resumePending = true) => {
-        await logStore.setItem(log.id, serializeLog(log));
-        await refreshLogs(resumePending);
+    const saveLog = async (log: GenerationLog, resumePending = true, tolerateStorageFailure = false) => {
+        try {
+            await logStore.setItem(log.id, serializeLog(log));
+            await refreshLogs(resumePending);
+        } catch (error) {
+            // Keep the task available for querying even if browser storage is full.
+            setLogs((items) => [log, ...items.filter((item) => item.id !== log.id)]);
+            if (!tolerateStorageFailure) throw error;
+        }
     };
 
     const refreshLogs = async (resumePending = true) => {
@@ -305,7 +323,7 @@ export default function VideoPage() {
 
     const resumePendingLogs = (items: GenerationLog[]) => {
         for (const log of items) {
-            if (log.status === "pending" && log.task) void pollGenerationLog(log);
+            if (shouldResumeVideoTask(log)) void pollGenerationLog(log);
         }
     };
 
@@ -315,45 +333,49 @@ export default function VideoPage() {
         pollControllersRef.current.set(log.id, controller);
         setRunning(true);
         setStartedAt((value) => value || performance.now());
-        setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
+        setResults([{ id: log.id, status: "pending" }]);
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
         try {
-            for (let attempt = 0; attempt < 120; attempt += 1) {
-                const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task, { signal: controller.signal });
-                throwIfAborted(controller.signal);
-                if (state.status === "completed") {
-                    const stored = await storeGeneratedVideo(state.result);
-                    throwIfAborted(controller.signal);
-                    const nextVideo: GeneratedVideo = {
-                        id: nanoid(),
-                        url: stored.url,
-                        storageKey: stored.storageKey,
-                        durationMs: Date.now() - log.createdAt,
-                        width: stored.width || 1280,
-                        height: stored.height || 720,
-                        bytes: stored.bytes,
-                        mimeType: stored.mimeType,
-                    };
-                    setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
-                    await saveLog({ ...log, status: "success", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
-                    message.success(t("videoWorkbench.generated"));
-                    return;
-                }
-                if (state.status === "failed") throw new Error(state.error);
-                if (attempt === 119) throw new Error(t("videoWorkbench.timeout"));
-                await delay(2500, controller.signal);
-            }
+            let queryError = "";
+            await saveLog({ ...log, status: "pending", error: undefined }, false);
+            const result = await waitForVideoGenerationTask(configOverride || taskConfig, log.task, {
+                signal: controller.signal,
+                onQueryError: async (error) => {
+                    const text = `${videoText("查询暂时中断，正在重连；原任务仍保留。", "Query interrupted; reconnecting to the original task.")} ${error instanceof Error ? error.message : ""}`;
+                    setResults([{ id: log.id, status: "pending", error: text }]);
+                    if (queryError !== text) await saveLog({ ...log, status: "pending", error: text }, false);
+                    queryError = text;
+                },
+                onPending: async (progress) => {
+                    setResults([{ id: log.id, status: "pending", progress }]);
+                    if (queryError) await saveLog({ ...log, status: "pending", error: undefined }, false);
+                    queryError = "";
+                },
+            });
+            throwIfAborted(controller.signal);
+            const stored = await storeGeneratedVideo(result);
+            throwIfAborted(controller.signal);
+            const nextVideo: GeneratedVideo = {
+                id: nanoid(), url: stored.url, storageKey: stored.storageKey,
+                durationMs: Date.now() - log.createdAt,
+                width: stored.width || 1280, height: stored.height || 720,
+                bytes: stored.bytes, mimeType: stored.mimeType,
+            };
+            setResults([{ id: log.id, status: "success", video: nextVideo }]);
+            await saveLog({ ...log, status: "success", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined }, false);
+            message.success(t("videoWorkbench.generated"));
         } catch (error) {
             if (controller.signal.aborted) {
                 if (!mountedRef.current) return;
                 const errorMessage = localStopMessage();
                 setResults([{ id: log.id, status: "stopped", error: errorMessage }]);
-                await saveLog({ ...log, status: "stopped", durationMs: Date.now() - log.createdAt, error: errorMessage });
+                await saveLog({ ...log, status: "stopped", durationMs: Date.now() - log.createdAt, error: errorMessage }, false, true);
                 return;
             }
             const errorMessage = error instanceof Error ? error.message : t("workbench.generationFailed");
-            setResults([{ id: log.id, status: "failed", error: errorMessage }]);
-            await saveLog({ ...log, status: "failed", durationMs: Date.now() - log.createdAt, error: errorMessage });
+            const status = isVideoTaskFailed(error) ? "failed" : "interrupted";
+            setResults([{ id: log.id, status, error: errorMessage }]);
+            await saveLog({ ...log, status, failureSource: status === "failed" ? "upstream" : undefined, durationMs: Date.now() - log.createdAt, error: errorMessage }, false, true);
             message.error(errorMessage);
         } finally {
             activeLogIdsRef.current.delete(log.id);
@@ -378,7 +400,8 @@ export default function VideoPage() {
         if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
         if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
         if (log.config.videoMode) updateConfig("videoMode", log.config.videoMode);
-        setResults(log.status === "pending" ? [{ id: log.id, status: "pending" }] : log.status === "stopped" ? [{ id: log.id, status: "stopped", error: log.error || localStopMessage() }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || t("workbench.generationFailed") }]);
+        const status = activeLogIdsRef.current.has(log.id) ? "pending" : canContinueVideoTask(log) ? "stopped" : log.status;
+        setResults([{ id: log.id, status, video: log.video, error: log.error }]);
     };
 
     return (
@@ -487,7 +510,11 @@ export default function VideoPage() {
                         </div>
                         {results.length ? (
                             <div className="grid gap-4">
-                                {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={retryResult} /> : result.status === "stopped" ? <StoppedVideoCard key={result.id} error={result.error || localStopMessage()} onRetry={retryResult} /> : <PendingVideoCard key={result.id} />))}
+                                {results.map((result) => {
+                                    const log = logs.find((item) => item.id === result.id);
+                                    const onContinue = log && canContinueVideoTask(log) ? () => { void pollGenerationLog(log); } : undefined;
+                                    return result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={retryResult} /> : result.status === "stopped" || result.status === "interrupted" ? <StoppedVideoCard key={result.id} error={result.error || localStopMessage()} onRetry={retryResult} onContinue={onContinue} /> : <PendingVideoCard key={result.id} error={result.error} progress={result.progress} />;
+                                })}
                             </div>
                         ) : (
                             <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
@@ -569,13 +596,15 @@ function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedV
     );
 }
 
-function PendingVideoCard() {
+function PendingVideoCard({ error, progress }: { error?: string; progress?: string | number }) {
     const { t } = useTranslation();
     return (
         <div className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
                 <LoaderCircle className="size-6 animate-spin" />
                 <span>{t("workbench.generating")}</span>
+                {progress !== undefined ? <span>{progress}{typeof progress === "number" ? "%" : ""}</span> : null}
+                {error ? <span className="max-w-full px-4 text-center text-xs">{error}</span> : null}
             </div>
         </div>
     );
@@ -593,25 +622,26 @@ function FailedVideoCard({ error, onRetry }: { error: string; onRetry: () => voi
             </div>
             <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
                 <Button size="small" danger onClick={onRetry}>
-                    {t("workbench.retry")}
+                    {videoText("重新生成", "Generate again")}
                 </Button>
             </div>
         </div>
     );
 }
 
-function StoppedVideoCard({ error, onRetry }: { error: string; onRetry: () => void }) {
+function StoppedVideoCard({ error, onRetry, onContinue }: { error: string; onRetry: () => void; onContinue?: () => void }) {
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
             <div className="flex aspect-video flex-col items-center justify-center gap-3 p-5 text-center">
-                <div className="text-sm font-medium text-stone-700 dark:text-stone-200">{localStopLabel()}</div>
+                <div className="text-sm font-medium text-stone-700 dark:text-stone-200">{videoText("等待已暂停", "Waiting paused")}</div>
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-stone-500 dark:!text-stone-400">
                     {error}
                 </Typography.Paragraph>
             </div>
-            <div className="flex justify-end border-t border-stone-200 p-3 dark:border-stone-700">
+            <div className="flex justify-end gap-2 border-t border-stone-200 p-3 dark:border-stone-700">
+                {onContinue ? <Button size="small" type="primary" onClick={onContinue}>{videoText("继续查询", "Continue querying")}</Button> : null}
                 <Button size="small" onClick={onRetry}>
-                    {i18n.t("workbench.retry")}
+                    {videoText("重新生成", "Generate again")}
                 </Button>
             </div>
         </div>
@@ -682,7 +712,7 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                 </div>
                 <div className="grid justify-items-end gap-2">
                     <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color={log.status === "success" ? "blue" : log.status === "pending" ? "processing" : log.status === "stopped" ? "default" : "red"}>
-                        {log.status === "stopped" ? localStopLabel() : t(`workbench.${log.status === "success" ? "success" : log.status === "pending" ? "generating" : "failed"}`)}
+                        {log.status === "stopped" || log.status === "interrupted" ? videoText("等待已暂停", "Waiting paused") : t(`workbench.${log.status === "success" ? "success" : log.status === "pending" ? "generating" : "failed"}`)}
                     </Tag>
                     <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="green">
                         {formatDuration(log.durationMs)}
@@ -728,10 +758,11 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         size: log.size || config.size || "",
         resolution: normalizeResolution(log.resolution || config.vquality || ""),
         seconds: log.seconds || config.videoSeconds || "",
-        status: log.status || "success",
+        status: log.status === "pending" && !log.task ? "interrupted" : log.status || "success",
         task: log.task,
         video,
-        error: log.error,
+        error: log.status === "pending" && !log.task ? videoText("任务提交结果未确认，请先核对任务列表，不要重复提交。", "Submission outcome unknown. Check your task list before creating another task.") : log.error,
+        failureSource: log.failureSource,
     };
 }
 
@@ -840,24 +871,10 @@ function localStopMessage() {
     return (i18n.resolvedLanguage || i18n.language || "en").startsWith("zh") ? "已停止本地等待，服务端任务可能仍在继续。" : "Stopped waiting locally. The server task may still continue.";
 }
 
-function throwIfAborted(signal: AbortSignal) {
-    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+function videoText(zh: string, en: string) {
+    return (i18n.resolvedLanguage || i18n.language || "en").startsWith("zh") ? zh : en;
 }
 
-function delay(ms: number, signal?: AbortSignal) {
-    return new Promise<void>((resolve, reject) => {
-        if (signal?.aborted) {
-            reject(new DOMException("Aborted", "AbortError"));
-            return;
-        }
-        const timer = setTimeout(resolve, ms);
-        signal?.addEventListener(
-            "abort",
-            () => {
-                clearTimeout(timer);
-                reject(new DOMException("Aborted", "AbortError"));
-            },
-            { once: true },
-        );
-    });
+function throwIfAborted(signal: AbortSignal) {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 }

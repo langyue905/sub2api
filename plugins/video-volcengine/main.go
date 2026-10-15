@@ -47,6 +47,7 @@ const (
 var compatibleVideoURLFields = []string{
 	"video.url", "video_url", "url", "result_url", "download_url",
 	"content.video_url", "content.url",
+	"data.0.url",
 	"data.video.url", "data.video_url", "data.url", "data.result_url", "data.download_url",
 	"data.content.video_url", "data.content.url",
 	"data.result.video.url", "data.result.video_url", "data.result.url", "data.result.download_url",
@@ -86,6 +87,7 @@ type seedanceTaskRoute struct {
 
 type providerConfig struct {
 	nativeGrok  bool
+	zhiqi       bool
 	protocol    string
 	baseURL     string
 	createPath  string
@@ -456,6 +458,12 @@ func (s *server) providerConfig(r *http.Request) (providerConfig, error) {
 		provider.statusPath = "/v1/videos/generations/{id}"
 		provider.contentPath = provider.statusPath
 	}
+	if isZhiqiBaseURL(provider.baseURL) && protocol != providerVolcengineArk {
+		provider.zhiqi = true
+		provider.createPath = waninterCreatePath
+		provider.statusPath = defaultStatusPath
+		provider.contentPath = defaultContentPath
+	}
 	// Waninter exposes its OpenAI-video models through /v1/videos. Older
 	// accounts were saved with the generic plugin default, so migrate that
 	// legacy value at request time without requiring every account to be edited.
@@ -531,7 +539,14 @@ func (s *server) createCompatibleVideo(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	createPath := provider.createPath
-	if provider.nativeGrok {
+	if provider.zhiqi {
+		var err error
+		payload, err = normalizeZhiqiVideoPayload(payload)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+	} else if provider.nativeGrok {
 		var err error
 		payload, err = normalizeNativeGrokPayload(payload)
 		if err != nil {
@@ -543,14 +558,14 @@ func (s *server) createCompatibleVideo(w http.ResponseWriter, r *http.Request, p
 	contentPath := provider.contentPath
 	// 画布对 1.5 可能显式传入文档路径，但当前 waninter 账号的实际
 	// 兼容入口仍是 /v1/videos；按模型强制统一，避免只回退默认值的遗漏。
-	if provider.protocol == providerWaninter && isWaninterGrokVideoPayload(payload) {
+	if !provider.zhiqi && provider.protocol == providerWaninter && isWaninterGrokVideoPayload(payload) {
 		createPath = waninterCreatePath
 		statusPath = defaultStatusPath
 		contentPath = defaultContentPath
 	}
-	seedanceRoute := provider.protocol == providerWaninter && isWaninterSeedancePath(createPath)
-	klingRoute := provider.protocol == providerWaninter && isWaninterNativeKlingModel(model) && isWaninterDefaultVideoPath(createPath)
-	if provider.protocol == providerWaninter {
+	seedanceRoute := !provider.zhiqi && provider.protocol == providerWaninter && isWaninterSeedancePath(createPath)
+	klingRoute := !provider.zhiqi && provider.protocol == providerWaninter && isWaninterNativeKlingModel(model) && isWaninterDefaultVideoPath(createPath)
+	if !provider.zhiqi && provider.protocol == providerWaninter {
 		if klingRoute {
 			if hasCompatibleImages(payload) {
 				createPath = waninterKlingImagePath
@@ -996,13 +1011,13 @@ func (s *server) getCompatibleVideo(w http.ResponseWriter, r *http.Request, prov
 		writeError(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return
 	}
-	if status == http.StatusNotFound && provider.protocol == providerWaninter && !isWaninterSeedancePath(statusPath) && provider.statusPath == defaultStatusPath {
+	if !provider.zhiqi && status == http.StatusNotFound && provider.protocol == providerWaninter && !isWaninterSeedancePath(statusPath) && provider.statusPath == defaultStatusPath {
 		fallbackBody, fallbackStatus, fallbackErr := s.callCompatibleJSON(r, http.MethodGet, providerPath(provider.baseURL, seedanceStatusPath, id), nil)
 		if fallbackErr == nil && fallbackStatus < http.StatusBadRequest {
 			body, status = fallbackBody, fallbackStatus
 		}
 	}
-	if status == http.StatusNotFound && provider.protocol == providerWaninter && isWaninterDefaultVideoPath(provider.createPath) {
+	if !provider.zhiqi && status == http.StatusNotFound && provider.protocol == providerWaninter && isWaninterDefaultVideoPath(provider.createPath) {
 		fallbackPath := strings.Replace(waninterKlingTextPath, "text2video", "text2video/{id}", 1)
 		fallbackBody, fallbackStatus, fallbackErr := s.callCompatibleJSON(r, http.MethodGet, providerPath(provider.baseURL, fallbackPath, id), nil)
 		if fallbackErr == nil && fallbackStatus < http.StatusBadRequest {
@@ -1038,14 +1053,14 @@ func (s *server) getCompatibleVideoContent(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return
 	}
-	if status == http.StatusNotFound && provider.protocol == providerWaninter && !isWaninterSeedancePath(statusPath) && provider.statusPath == defaultStatusPath {
+	if !provider.zhiqi && status == http.StatusNotFound && provider.protocol == providerWaninter && !isWaninterSeedancePath(statusPath) && provider.statusPath == defaultStatusPath {
 		fallbackBody, fallbackStatus, fallbackErr := s.callCompatibleJSON(r, http.MethodGet, providerPath(provider.baseURL, seedanceStatusPath, id), nil)
 		if fallbackErr == nil && fallbackStatus < http.StatusBadRequest {
 			statusBody, status = fallbackBody, fallbackStatus
 			statusPath, contentPath = seedanceStatusPath, seedanceStatusPath
 		}
 	}
-	if status == http.StatusNotFound && provider.protocol == providerWaninter && isWaninterDefaultVideoPath(provider.createPath) {
+	if !provider.zhiqi && status == http.StatusNotFound && provider.protocol == providerWaninter && isWaninterDefaultVideoPath(provider.createPath) {
 		fallbackPath := strings.Replace(waninterKlingTextPath, "text2video", "text2video/{id}", 1)
 		fallbackBody, fallbackStatus, fallbackErr := s.callCompatibleJSON(r, http.MethodGet, providerPath(provider.baseURL, fallbackPath, id), nil)
 		if fallbackErr == nil && fallbackStatus < http.StatusBadRequest {
@@ -1057,7 +1072,11 @@ func (s *server) getCompatibleVideoContent(w http.ResponseWriter, r *http.Reques
 		writeUpstreamError(w, status, statusBody)
 		return
 	}
-	videoURL := firstJSONString(statusBody, compatibleVideoURLFields...)
+	if provider.zhiqi && normalizeCompatibleTask(statusBody, id)["status"] != "done" {
+		writeError(w, http.StatusConflict, "video_not_ready", "video task has not succeeded; query the original task for its status")
+		return
+	}
+	videoURL := compatibleVideoURL(statusBody)
 	if videoURL == "" && contentPath != statusPath {
 		contentURL := providerPath(provider.baseURL, contentPath, id)
 		contentReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, contentURL, nil)
@@ -1094,7 +1113,13 @@ func (s *server) getCompatibleVideoContent(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusBadGateway, "upstream_error", "compatible video content response is invalid")
 			return
 		}
-		videoURL = firstJSONString(body, compatibleVideoURLFields...)
+		videoURL = compatibleVideoURL(body)
+		if videoURL == "" {
+			if message := firstJSONString(body, "error.message", "error", "message"); message != "" {
+				writeError(w, http.StatusBadGateway, "upstream_error", message)
+				return
+			}
+		}
 	}
 	if videoURL == "" {
 		writeError(w, http.StatusConflict, "video_not_ready", "video is not ready")
@@ -1244,7 +1269,7 @@ func normalizeCompatibleTask(body []byte, fallbackID string) map[string]any {
 		"model":  firstJSONString(body, "model", "data.model", "data.result.model", "result.model", "output.model"),
 		"status": normalizeCompatibleStatus(firstJSONString(body, "status", "state", "task_status", "data.status", "data.state", "data.task_status", "data.result.status", "data.result.state", "result.status", "result.state", "output.status", "output.state")),
 	}
-	if urlValue := firstJSONString(body, compatibleVideoURLFields...); urlValue != "" {
+	if urlValue := compatibleVideoURL(body); urlValue != "" {
 		video := map[string]any{"url": urlValue}
 		if duration, err := strconv.ParseFloat(firstJSONString(body, "video.duration", "duration", "seconds", "data.video.duration", "data.duration", "data.seconds", "data.result.video.duration", "data.result.duration", "result.duration", "output.duration"), 64); err == nil && duration > 0 {
 			video["duration"] = duration
@@ -1275,6 +1300,14 @@ func normalizeCompatibleTask(body []byte, fallbackID string) map[string]any {
 	if errorValue := firstJSONString(body, "error.message", "error", "data.error.message", "data.error"); errorValue != "" {
 		result["error"] = errorValue
 	}
+	for _, field := range []string{"progress", "created", "completed_at"} {
+		if value := firstJSONString(body, field); value != "" {
+			result[field] = value
+		}
+	}
+	if code := firstJSONString(body, "error.code", "data.error.code"); code != "" {
+		result["error"] = map[string]string{"code": code, "message": firstJSONString(body, "error.message", "data.error.message")}
+	}
 	return result
 }
 
@@ -1291,6 +1324,25 @@ func normalizeCompatibleStatus(raw string) string {
 	default:
 		return "failed"
 	}
+}
+
+func compatibleVideoURL(body []byte) string {
+	if value := firstJSONString(body, compatibleVideoURLFields...); value != "" {
+		return value
+	}
+	var root struct {
+		Data []struct {
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(body, &root) == nil {
+		for _, item := range root.Data {
+			if value := strings.TrimSpace(item.URL); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
 }
 
 func firstJSONString(body []byte, paths ...string) string {
@@ -1418,6 +1470,9 @@ func (s *server) validateDownloadURLForProvider(raw string, provider providerCon
 		return nil, fmt.Errorf("volcengine returned an unsafe video URL")
 	}
 	host := strings.ToLower(u.Hostname())
+	if provider.zhiqi && host == "vfile.zhiqizhineng.com" {
+		return u, nil
+	}
 	for _, allowed := range s.cfg.allowedDownloadHosts {
 		allowed = strings.ToLower(strings.TrimSpace(allowed))
 		if strings.HasPrefix(allowed, ".") && strings.HasSuffix(host, allowed) || host == allowed {

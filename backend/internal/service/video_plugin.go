@@ -592,12 +592,25 @@ func normalizeVideoPluginPublicStatus(body []byte) ([]byte, error) {
 			}
 			break
 		}
+		if !gjson.GetBytes(out, "url").Exists() {
+			for _, item := range gjson.GetBytes(out, "data").Array() {
+				if videoURL := strings.TrimSpace(item.Get("url").String()); videoURL != "" {
+					var err error
+					out, err = sjson.SetBytes(out, "url", videoURL)
+					if err != nil {
+						return nil, fmt.Errorf("normalize video plugin result url: %w", err)
+					}
+					break
+				}
+			}
+		}
 	}
 	return out, nil
 }
 
 var videoPluginResultURLFields = []string{
 	"video.url", "video_url", "url", "result_url", "download_url",
+	"data.0.url",
 	"content.video_url", "content.url",
 	"data.video.url", "data.video_url", "data.url", "data.download_url",
 	"data.content.video_url", "data.content.url",

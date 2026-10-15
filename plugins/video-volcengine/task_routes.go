@@ -68,6 +68,10 @@ func (s *server) storeTaskRoute(r *http.Request, provider providerConfig, id str
 }
 
 func (s *server) videoTaskPaths(r *http.Request, provider providerConfig, id string) (string, string) {
+	// Zhiqi retired vendor paths, including those cached by older plugin versions.
+	if provider.zhiqi {
+		return defaultStatusPath, defaultContentPath
+	}
 	key := taskRouteKey(r, provider, id)
 	var route seedanceTaskRoute
 	if value, ok := s.taskRoutes.Load(key); ok {

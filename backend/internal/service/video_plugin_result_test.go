@@ -18,6 +18,20 @@ func TestNormalizeVideoPluginPublicStatusSupportsNestedRelayResult(t *testing.T)
 	require.Equal(t, "https://cdn.example.com/video.mp4", gjson.GetBytes(normalized, "url").String())
 }
 
+func TestNormalizeVideoPluginPublicStatusSupportsZhiqiArray(t *testing.T) {
+	for _, status := range []string{"in_progress", "succeeded", "failed", "expired"} {
+		body := []byte(`{"id":"existing","status":"` + status + `","progress":"99%","data":[{}, {"url":"https://vfile.zhiqizhineng.com/result.mp4"}],"error":{"code":"media_storage_failed"}}`)
+		normalized, err := normalizeVideoPluginPublicStatus(body)
+		require.NoError(t, err)
+		require.Equal(t, "https://vfile.zhiqizhineng.com/result.mp4", gjson.GetBytes(normalized, "url").String())
+		require.Equal(t, "99%", gjson.GetBytes(normalized, "progress").String())
+		require.Equal(t, "media_storage_failed", gjson.GetBytes(normalized, "error.code").String())
+		if status == "in_progress" {
+			require.NotEqual(t, "completed", gjson.GetBytes(normalized, "status").String())
+		}
+	}
+}
+
 func TestVideoPluginMappedModelUsesRequestedPrice(t *testing.T) {
 	result := videoPluginForwardResult(grokMediaUsageMetadata{Model: "provider-model", BillingModel: "provider-model"}, "public-model", "provider-model", http.Header{}, time.Now())
 	require.Equal(t, "public-model", result.Model)
