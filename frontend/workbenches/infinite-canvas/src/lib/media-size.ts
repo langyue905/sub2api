@@ -106,6 +106,7 @@ export function clampVideoSeconds(value: string) {
 
 export function parseVideoResolution(value: string | undefined) {
     const raw = String(value || "").trim().toLowerCase();
+    if (raw === "2k" || raw === "4k") return raw;
     if (raw === "low") return "480";
     if (raw === "auto" || raw === "high" || raw === "medium") return "720";
     const number = raw.replace(/p$/i, "");

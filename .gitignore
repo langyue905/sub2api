@@ -117,6 +117,10 @@ backend/.installed
 # 其他
 # ===================
 tests
+!frontend/workbenches/infinite-canvas/tests/
+frontend/workbenches/infinite-canvas/tests/*
+!frontend/workbenches/infinite-canvas/tests/minimax-h3.test.mjs
+!frontend/workbenches/infinite-canvas/tests/h3-model-selection.test.ts
 !deploy/tests/
 !deploy/tests/**
 CLAUDE.md

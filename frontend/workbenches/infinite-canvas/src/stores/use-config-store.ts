@@ -1,3 +1,4 @@
+import { isMiniMaxH3 } from "@/lib/minimax-h3";
 import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -53,6 +54,7 @@ const IMAGE_KEYWORDS = ["seedream", "gpt-image", "image", "dall-e", "dalle", "im
 export function boolConfig(value: string, fallback: boolean) { return value ? value === "true" : fallback; }
 export function guessCapability(name: string): ModelCapability {
     const value = name.toLowerCase();
+    if (isMiniMaxH3(value)) return "video";
     if (VIDEO_KEYWORDS.some((keyword) => value.includes(keyword))) return "video";
     if (AUDIO_KEYWORDS.some((keyword) => value.includes(keyword))) return "audio";
     return IMAGE_KEYWORDS.some((keyword) => value.includes(keyword)) ? "image" : "text";
@@ -99,7 +101,7 @@ function normalizeLockedConfig(input: Partial<AiConfig>): AiConfig {
 
 export const useConfigStore = create<ConfigStore>()(persist((set) => ({
     config: defaultConfig, isConfigOpen: false, shouldPromptContinue: false,
-    updateConfig: (key, value) => set((state) => ({ config: normalizeLockedConfig({ ...state.config, [key]: value }) })),
+    updateConfig: (key, value) => set((state) => ({ config: normalizeLockedConfig({ ...state.config, ...(key === "videoModel" && isMiniMaxH3(String(value)) && !isMiniMaxH3(state.config.videoModel) ? { vquality: "768", size: "16:9", videoSeconds: "5" } : {}), [key]: value }) })),
     importChannelCredentials: (input) => {
         const apiKey = input.apiKey?.trim();
         if (!apiKey) return { status: "missing-base-url" };

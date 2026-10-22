@@ -67,6 +67,20 @@ func (s *server) storeTaskRoute(r *http.Request, provider providerConfig, id str
 	return os.Rename(file.Name(), filepath.Join(s.cfg.taskRouteDir, key+".json"))
 }
 
+func (s *server) isMiniMaxH3Task(r *http.Request, provider providerConfig, id string) bool {
+	key := taskRouteKey(r, provider, id)
+	value, ok := s.taskRoutes.Load(key)
+	if !ok && s.cfg.taskRouteDir != "" {
+		var route seedanceTaskRoute
+		data, err := os.ReadFile(filepath.Join(s.cfg.taskRouteDir, key+".json"))
+		if err == nil && json.Unmarshal(data, &route) == nil {
+			value = route
+		}
+	}
+	route, _ := value.(seedanceTaskRoute)
+	return route.MiniMaxH3 && time.Since(route.CreatedAt) < taskRouteTTL
+}
+
 func (s *server) videoTaskPaths(r *http.Request, provider providerConfig, id string) (string, string) {
 	// Zhiqi retired vendor paths, including those cached by older plugin versions.
 	if provider.zhiqi {

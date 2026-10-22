@@ -29,6 +29,37 @@ beforeEach(() => vi.resetAllMocks())
 afterEach(() => vi.useRealTimers())
 
 describe('asynchronous video tasks', () => {
+  it.each([
+    ['768', '1:1', '1024x1024', '768p'],
+    ['1080', '1:1', '1440x1440', '1080p'],
+    ['2k', '21:9', '2K', '2k'],
+    ['4k', '9:16', '4K', '4k'],
+  ])('submits H3 %s with its exact size and billing tier', async (vquality, size, expectedSize, resolution) => {
+    post.mockResolvedValue({ data: { id: 'wrapper-id', data: { task_id: 'h3-task', id: 'secondary-id' } } })
+    const created = await createVideoGenerationTask({ ...config, model: 'MiniMax-H3', videoModel: 'MiniMax-H3', videoSeconds: '15', vquality, size }, 'camera move')
+    expect(created.id).toBe('h3-task')
+    expect(post).toHaveBeenCalledTimes(1)
+    const body = post.mock.calls[0][1] as Record<string, unknown>
+    expect(body).toEqual({ model: 'MiniMax-H3', prompt: 'camera move', seconds: 15, resolution, size: expectedSize, ...(vquality.endsWith('k') ? { aspect_ratio: size } : {}) })
+  })
+
+  it.each([
+    { vquality: '480' }, { vquality: '2160p' }, { videoSeconds: '3' },
+    { videoSeconds: '16' }, { size: 'auto' }, { vquality: '768', size: '1440x1440' },
+  ])('rejects invalid persisted H3 settings before creating: %j', async (settings) => {
+    await expect(createVideoGenerationTask({ ...config, model: 'MiniMax-H3', videoModel: 'MiniMax-H3', videoSeconds: '5', vquality: '2k', size: '16:9', ...settings }, 'camera move')).rejects.toThrow()
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('resumes an H3 task and prefers result_url without resubmission', async () => {
+    const preferred = 'https://video.example/preferred.mp4'
+    get.mockResolvedValueOnce({ data: { data: { status: 'succeeded', result_url: preferred, video_url: url, url } } })
+      .mockResolvedValueOnce({ data: video })
+    const state = await pollVideoGenerationTask({ ...config, videoModel: 'MiniMax-H3' }, { ...task, model: 'MiniMax-H3' })
+    expect(state).toMatchObject({ status: 'completed', result: { url: preferred } })
+    expect(post).not.toHaveBeenCalled()
+  })
+
   it('keeps the same task beyond the former five-minute cutoff and POSTs only once', async () => {
     vi.useFakeTimers()
     post.mockResolvedValue({ data: { id: task.id, status: 'queued' } })

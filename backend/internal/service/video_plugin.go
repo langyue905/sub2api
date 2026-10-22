@@ -74,15 +74,15 @@ func (s *OpenAIGatewayService) ForwardVideoPlugin(
 		return nil, err
 	}
 
+	requestInfo := ParseGrokMediaRequest(contentType, body)
 	if endpoint.RequiresRequestBody() {
-		body, err = normalizeVideoPluginRequestBody(contentType, body)
+		body, requestInfo, err = PrepareVideoPluginCreateRequest(account, contentType, body)
 		if err != nil {
 			return nil, err
 		}
 		contentType = "application/json"
 	}
 
-	requestInfo := ParseGrokMediaRequest(contentType, body)
 	upstreamModel := requestInfo.Model
 	if endpoint.RequiresRequestBody() {
 		if mapped := strings.TrimSpace(account.GetMappedModel(requestInfo.Model)); mapped != "" {
@@ -139,8 +139,8 @@ func (s *OpenAIGatewayService) ForwardVideoPlugin(
 		// Zhiqi queues creates durably. A failed response cannot establish that
 		// the task was rejected; another POST could generate and charge twice.
 		providerURL, parseErr := url.Parse(account.GetCredential("provider_base_url"))
-		if endpoint == GrokMediaEndpointVideosGenerations && parseErr == nil &&
-			(strings.EqualFold(providerURL.Hostname(), "zhiqiapi.com") || strings.HasSuffix(strings.ToLower(providerURL.Hostname()), ".zhiqiapi.com")) {
+		if endpoint == GrokMediaEndpointVideosGenerations && (isMiniMaxH3(requestInfo.Model) || isMiniMaxH3(upstreamModel) || (parseErr == nil &&
+			(strings.EqualFold(providerURL.Hostname(), "zhiqiapi.com") || strings.HasSuffix(strings.ToLower(providerURL.Hostname()), ".zhiqiapi.com")))) {
 			var failoverErr *UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				stopped := *failoverErr
@@ -305,7 +305,7 @@ func videoReferenceURL(value any) string {
 
 func videoPluginModelNeedsPublicReference(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
-	return strings.HasPrefix(model, "grok-") || strings.HasPrefix(model, "kling-") || isSeedanceVideoModel(model)
+	return isMiniMaxH3(model) || strings.HasPrefix(model, "grok-") || strings.HasPrefix(model, "kling-") || isSeedanceVideoModel(model)
 }
 
 func externalizeVideoReferenceValue(ctx context.Context, dir, publicBaseURL string, value any) (any, bool, error) {
@@ -504,9 +504,12 @@ func serveTemporaryVideoReferenceFromDir(c *gin.Context, dir string, now time.Ti
 
 func normalizeVideoPluginRequestBody(contentType string, body []byte) ([]byte, error) {
 	if gjson.ValidBytes(body) {
+		if isMiniMaxH3(gjson.GetBytes(body, "model").String()) {
+			return NormalizeMiniMaxH3Request(contentType, body)
+		}
 		resolution := firstNonEmpty(gjson.GetBytes(body, "resolution").String(), gjson.GetBytes(body, "resolution_name").String())
 		if resolution != "" {
-			if _, ok := LookupVideoBillingResolution(resolution); !ok {
+			if !isLegacyVideoPluginResolution(resolution) {
 				return nil, fmt.Errorf("video plugin resolution must be 480p, 720p or 1080p")
 			}
 		}
@@ -519,8 +522,11 @@ func normalizeVideoPluginRequestBody(contentType string, body []byte) ([]byte, e
 
 	var rawInfo GrokMediaRequestInfo
 	parseGrokMediaMultipartRequest(contentType, body, &rawInfo)
+	if isMiniMaxH3(rawInfo.Model) {
+		return nil, fmt.Errorf("MiniMax-H3 requires application/json with public reference URLs; multipart is not supported")
+	}
 	if rawInfo.Resolution != "" {
-		if _, ok := LookupVideoBillingResolution(rawInfo.Resolution); !ok {
+		if !isLegacyVideoPluginResolution(rawInfo.Resolution) {
 			return nil, fmt.Errorf("video plugin resolution must be 480p, 720p or 1080p")
 		}
 	}
@@ -558,6 +564,11 @@ func normalizeVideoPluginRequestBody(contentType string, body []byte) ([]byte, e
 		return nil, fmt.Errorf("convert video plugin multipart request: %w", err)
 	}
 	return converted, nil
+}
+
+func isLegacyVideoPluginResolution(value string) bool {
+	tier, ok := LookupVideoBillingResolution(value)
+	return ok && (tier == "480p" || tier == "720p" || tier == "1080p")
 }
 
 func videoPluginRatioFromSize(size string) string {
@@ -623,7 +634,7 @@ func normalizeVideoPluginPublicStatus(body []byte) ([]byte, error) {
 }
 
 var videoPluginResultURLFields = []string{
-	"video.url", "video_url", "url", "result_url", "download_url",
+	"video.url", "video_url", "url", "result_url", "download_url", "metadata.url", "data.metadata.url", "data.result_url",
 	"data.0.url",
 	"content.video_url", "content.url",
 	"data.video.url", "data.video_url", "data.url", "data.download_url",
@@ -844,7 +855,15 @@ func videoPluginForwardResult(meta grokMediaUsageMetadata, requestModel, upstrea
 
 // An arbitrary video provider has no built-in per-second price. Reject an
 // unpriced create before spending upstream funds instead of using image rates.
-func (s *OpenAIGatewayService) ValidateVideoPluginPricing(ctx context.Context, apiKey *APIKey, model, resolution string) error {
+func (s *OpenAIGatewayService) ValidateVideoPluginPricing(ctx context.Context, apiKey *APIKey, model, resolution string, upstreamModels ...string) error {
+	h3 := isMiniMaxH3(model)
+	for _, upstream := range upstreamModels {
+		h3 = h3 || isMiniMaxH3(upstream)
+	}
+	if h3 {
+		return s.ValidateMiniMaxH3Pricing(ctx, apiKey, model, resolution)
+	}
+
 	if apiKeyHasConfiguredVideoPrice(apiKey, model, NormalizeVideoBillingResolutionOrDefault(resolution)) {
 		return nil
 	}
@@ -855,4 +874,27 @@ func (s *OpenAIGatewayService) ValidateVideoPluginPricing(ctx context.Context, a
 		}
 	}
 	return fmt.Errorf("%w: video model %s", ErrModelPricingUnavailable, model)
+}
+
+// ValidateMiniMaxH3Pricing also validates public aliases mapped to MiniMax-H3.
+func (s *OpenAIGatewayService) ValidateMiniMaxH3Pricing(ctx context.Context, apiKey *APIKey, model, resolution string) error {
+	tier := miniMaxH3Tier(resolution)
+	if tier != "" {
+		resolved := s.resolveOpenAIChannelPricing(ctx, model, apiKey)
+		if resolved != nil && resolved.Source == PricingSourceGroup && resolved.Mode == BillingModeVideo {
+			if h3HasExactVideoPrice(resolved, tier) {
+				return nil
+			}
+			return fmt.Errorf("%w: MiniMax-H3 group price missing for %s", ErrModelPricingUnavailable, tier)
+		}
+		if apiKey != nil && apiKey.Group != nil {
+			if price := LookupVideoModelPrice(apiKey.Group.VideoModelPrices, model, tier); price != nil && validH3Price(*price) {
+				return nil
+			}
+		}
+		if h3HasExactVideoPrice(resolved, tier) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: MiniMax-H3 requires a positive per-second price for %s", ErrModelPricingUnavailable, resolution)
 }

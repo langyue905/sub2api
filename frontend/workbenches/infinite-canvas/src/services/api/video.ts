@@ -1,6 +1,7 @@
 import axios from "axios";
 
 import i18n from "@/i18n";
+import { h3VideoOptions, isMiniMaxH3, validateH3References } from "@/lib/minimax-h3";
 import { clampVideoSeconds, inferVideoRatio, parseVideoResolution } from "@/lib/media-size";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { getImageBlob, imageToDataUrl } from "@/services/image-storage";
@@ -18,6 +19,7 @@ type VideoResponse = {
     url?: string;
     result_url?: string;
     video_url?: string;
+    metadata?: { url?: string };
     content?: { video_url?: string; url?: string } | null;
     video?: VideoResponse;
     data?: VideoResponse | VideoResponse[] | null;
@@ -127,14 +129,18 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
     const requestKey = await videoTaskRequestKey(config);
+    const h3 = isMiniMaxH3(model);
+    // Validate everything before uploading media or submitting a billable create.
+    const h3Options = h3 ? h3VideoOptions(config.vquality, config.size, config.videoSeconds, prompt) : null;
+    if (h3) validateH3References(references.length, options?.videos?.length || 0, options?.audios?.length || 0);
     const seedance = /^(doubao-)?seedance-/i.test(modelOptionName(model));
-    if (!seedance && options?.videos?.length) throw new Error(apiText("invalidReferenceVideo"));
-    if (!seedance && options?.audios?.length) throw new Error(apiText("invalidReferenceAudio"));
+    if (!h3 && !seedance && options?.videos?.length) throw new Error(apiText("invalidReferenceVideo"));
+    if (!h3 && !seedance && options?.audios?.length) throw new Error(apiText("invalidReferenceAudio"));
     const imageUrls: string[] = [];
     for (const image of references) {
-        imageUrls.push(seedance ? await uploadVideoReference(config, image, "image", options) : await imageToDataUrl(image, { signal: options?.signal }));
+        imageUrls.push(seedance || h3 ? await uploadVideoReference(config, image, "image", options) : await imageToDataUrl(image, { signal: options?.signal }));
     }
-    if (!seedance && imageUrls.some((url) => !url.startsWith("data:image/"))) throw new Error(apiText("referenceImageReadFailed"));
+    if (!h3 && !seedance && imageUrls.some((url) => !url.startsWith("data:image/"))) throw new Error(apiText("referenceImageReadFailed"));
 
     // The gateway adapter translates this stable contract for the selected provider.
     const body: Record<string, unknown> = {
@@ -144,21 +150,22 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
         resolution: normalizeVideoResolution(config.vquality),
     };
     const aspectRatio = inferVideoRatio(config.size);
-    if (aspectRatio !== "auto") body.aspect_ratio = aspectRatio;
+    if (h3Options) { delete body.duration; Object.assign(body, h3Options); }
+    else if (aspectRatio !== "auto") body.aspect_ratio = aspectRatio;
     if (imageUrls.length === 1) body.image = { url: imageUrls[0] };
     if (imageUrls.length > 1) body.reference_images = imageUrls.map((url) => ({ url }));
-    if (seedance) {
-        body.generate_audio = config.videoGenerateAudio !== "false";
+    if (seedance || h3) {
+        if (seedance) body.generate_audio = config.videoGenerateAudio !== "false";
         const videos: string[] = [];
         const audios: string[] = [];
         for (const video of options?.videos || []) videos.push(await uploadVideoReference(config, video, "video", options));
         for (const audio of options?.audios || []) audios.push(await uploadVideoReference(config, audio, "audio", options));
-        if (videos.length) body.videos = videos;
-        if (audios.length) body.audios = audios;
+        if (videos.length) body[h3 ? "reference_videos" : "videos"] = videos;
+        if (audios.length) body[h3 ? "reference_audios" : "audios"] = audios;
     }
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos/generations"), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
-        const id = videoTaskId(created);
+        const id = videoTaskId(created, h3);
         if (!id) {
             const error = new Error("任务提交结果未确认：接口未返回任务 ID。请先核对任务列表，不要直接重复提交。");
             error.name = "VideoSubmissionUncertain";
@@ -260,10 +267,10 @@ function hasVideoPayload(value: VideoResponse) {
     return Boolean(value.id || value.request_id || value.task_id || value.status || value.url || value.result_url || value.video_url || value.video || value.content);
 }
 
-function videoTaskId(value: VideoResponse) {
+function videoTaskId(value: VideoResponse, h3 = false) {
     const data = Array.isArray(value.data) ? undefined : value.data;
-    return [value, data || undefined, value.video || undefined, data?.video || undefined]
-        .flatMap((item) => item ? [item.id, item.request_id, item.task_id] : [])
+    const items = [value, data || undefined, value.video || undefined, data?.video || undefined];
+    return (h3 ? [...items.map((item) => item?.task_id), ...items.map((item) => item?.id)] : items.flatMap((item) => item ? [item.id, item.request_id, item.task_id] : []))
         .find((id): id is string => typeof id === "string" && Boolean(id));
 }
 
@@ -283,7 +290,7 @@ function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
 
 function videoResultUrl(payload: VideoResponse) {
     const data = Array.isArray(payload.data) ? payload.data : payload.data ? [payload.data] : [];
-    return [payload.video_url, payload.result_url, payload.url, payload.content?.video_url, payload.content?.url, payload.video?.video_url, payload.video?.result_url, payload.video?.url, payload.video?.content?.video_url, payload.video?.content?.url, ...data.flatMap((item) => [item.url, item.video_url, item.result_url])].find((url): url is string => typeof url === "string" && isPublicMediaUrl(url));
+    return [payload.result_url, payload.video_url, payload.url, payload.metadata?.url, payload.content?.video_url, payload.content?.url, payload.video?.video_url, payload.video?.result_url, payload.video?.url, payload.video?.content?.video_url, payload.video?.content?.url, ...data.flatMap((item) => [item.result_url, item.video_url, item.url, item.metadata?.url])].find((url): url is string => typeof url === "string" && isPublicMediaUrl(url));
 }
 
 function readApiErrorMessage(value: unknown): string {

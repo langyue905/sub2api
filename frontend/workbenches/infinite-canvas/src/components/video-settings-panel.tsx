@@ -3,6 +3,7 @@ import { Slider } from "antd";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
+import { h3Ratios, h3Resolutions, h3Ratio, h3Selection, isMiniMaxH3 } from "@/lib/minimax-h3";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { clampVideoSeconds, computeVideoSize, inferVideoRatio, parseVideoResolution, readVideoDimensions, VIDEO_SECONDS_MAX, VIDEO_SECONDS_MIN, videoRatioOptions } from "@/lib/media-size";
@@ -28,16 +29,20 @@ type VideoSettingsPanelProps = {
 
 export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: VideoSettingsPanelProps) {
     const { t } = useTranslation();
-    const seconds = Number(clampVideoSeconds(config.videoSeconds || "6"));
-    const resolution = parseVideoResolution(config.vquality);
-    const selectedRatio = inferVideoRatio(config.size || "auto");
-    const dimensions = readVideoDimensions(config.size || "auto", resolution, selectedRatio);
+    const h3 = isMiniMaxH3(config.videoModel || config.model);
+    const maxSeconds = h3 ? 15 : VIDEO_SECONDS_MAX;
+    const seconds = Math.min(maxSeconds, Number(clampVideoSeconds(config.videoSeconds || (h3 ? "5" : "6"))));
+    const selection = h3Selection(config.vquality, config.size);
+    const resolution = h3 ? selection.tier : parseVideoResolution(config.vquality);
+    const selectedRatio = h3 ? selection.ratio : inferVideoRatio(config.size || "auto");
+    const fixedSize = h3 ? selection.fixedSize : config.size || "auto";
+    const dimensions = h3 && (!fixedSize || /K$/.test(fixedSize)) ? null : readVideoDimensions(fixedSize, resolution, selectedRatio);
     const applySize = (nextResolution: string, ratio: string) => {
         onConfigChange("vquality", nextResolution);
-        onConfigChange("size", computeVideoSize(nextResolution, ratio));
+        onConfigChange("size", h3 ? ratio : computeVideoSize(nextResolution, ratio));
     };
     const selectResolution = (nextResolution: string) => {
-        if (selectedRatio === "auto") onConfigChange("vquality", nextResolution);
+        if (!selectedRatio || selectedRatio === "auto") onConfigChange("vquality", nextResolution);
         else applySize(nextResolution, selectedRatio);
     };
 
@@ -45,26 +50,27 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="text-lg font-semibold">{t("settingsPanels.video.title")}</div> : null}
+                {h3 && !selection.valid ? <div role="alert" className="text-sm">请重新选择 MiniMax-H3 清晰度和画幅。</div> : null}
                 <SettingGroup title={t("settingsPanels.video.quality")} color={theme.node.muted}>
                     <div className="grid grid-cols-4 gap-2.5">
-                        {resolutionOptions.map((item) => (
+                        {(h3 ? h3Resolutions : resolutionOptions).map((item) => (
                             <OptionPill key={item.value} selected={resolution === item.value} theme={theme} onClick={() => selectResolution(item.value)}>
                                 {item.label}
                             </OptionPill>
                         ))}
-                        <ResolutionInput value={resolution} theme={theme} onChange={selectResolution} />
+                        {!h3 && <ResolutionInput value={resolution} theme={theme} onChange={selectResolution} />}
                     </div>
                 </SettingGroup>
                 <SettingGroup title={t("settingsPanels.video.size")} color={theme.node.muted}>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
-                        <DimensionInput prefix="W" value={dimensions.width} disabled={selectedRatio === "auto"} theme={theme} onChange={(value) => updateDimension("width", value, dimensions, onConfigChange)} />
+                    {dimensions ? <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
+                        <DimensionInput prefix="W" value={dimensions.width} disabled={h3 || selectedRatio === "auto"} theme={theme} onChange={(value) => updateDimension("width", value, dimensions, onConfigChange)} />
                         <span className="text-lg opacity-45">↔</span>
-                        <DimensionInput prefix="H" value={dimensions.height} disabled={selectedRatio === "auto"} theme={theme} onChange={(value) => updateDimension("height", value, dimensions, onConfigChange)} />
-                    </div>
+                        <DimensionInput prefix="H" value={dimensions.height} disabled={h3 || selectedRatio === "auto"} theme={theme} onChange={(value) => updateDimension("height", value, dimensions, onConfigChange)} />
+                    </div> : <div className="py-2 text-sm">{fixedSize} · {selectedRatio}</div>}
                 </SettingGroup>
                 <SettingGroup title={t("settingsPanels.video.ratio")} color={theme.node.muted}>
                     <div className="grid grid-cols-4 gap-2.5">
-                        {videoRatioOptions.map((item) => (
+                        {(h3 ? h3Ratios : videoRatioOptions).map((item) => (
                             <button
                                 key={item.value}
                                 type="button"
@@ -81,8 +87,8 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 </SettingGroup>
                 <SettingGroup title={t("settingsPanels.video.seconds")} color={theme.node.muted}>
                     <div className="flex items-center gap-3" onMouseDown={(event) => event.stopPropagation()}>
-                        <Slider className="min-w-0 flex-1" min={VIDEO_SECONDS_MIN} max={VIDEO_SECONDS_MAX} step={1} value={seconds} onChange={(value) => onConfigChange("videoSeconds", String(Array.isArray(value) ? value[0] : value))} />
-                        <SecondsInput value={seconds} theme={theme} onCommit={(value) => onConfigChange("videoSeconds", String(value))} />
+                        <Slider className="min-w-0 flex-1" min={VIDEO_SECONDS_MIN} max={maxSeconds} step={1} value={seconds} onChange={(value) => onConfigChange("videoSeconds", String(Array.isArray(value) ? value[0] : value))} />
+                        <SecondsInput max={maxSeconds} value={seconds} theme={theme} onCommit={(value) => onConfigChange("videoSeconds", String(value))} />
                         <span className="shrink-0 text-sm" style={{ color: theme.node.muted }}>s</span>
                     </div>
                 </SettingGroup>
@@ -92,10 +98,12 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
 }
 
 export function videoResolutionLabel(value: string) {
-    return `${parseVideoResolution(value)}p`;
+    const parsed = parseVideoResolution(value);
+    return /k$/i.test(parsed) ? parsed.toUpperCase() : `${parsed}p`;
 }
 
 export function videoSizeLabel(value: string) {
+    try { return h3Ratio(value); } catch { /* use the existing generic label */ }
     const ratio = inferVideoRatio(value);
     return ratio === "auto" ? i18n.t("settingsPanels.video.adaptive") : ratio;
 }
@@ -151,9 +159,9 @@ function ResolutionInput({ value, theme, onChange }: { value: string; theme: Can
     );
 }
 
-function SecondsInput({ value, theme, onCommit }: { value: number; theme: CanvasTheme; onCommit: (value: number) => void }) {
+function SecondsInput({ value, theme, onCommit, max }: { max: number; value: number; theme: CanvasTheme; onCommit: (value: number) => void }) {
     const commit = (input: HTMLInputElement) => {
-        const next = Number(clampVideoSeconds(input.value));
+        const next = Math.min(max, Number(clampVideoSeconds(input.value)));
         input.value = String(next);
         onCommit(next);
     };
@@ -163,7 +171,7 @@ function SecondsInput({ value, theme, onCommit }: { value: number; theme: Canvas
             <input
                 type="number"
                 min={VIDEO_SECONDS_MIN}
-                max={VIDEO_SECONDS_MAX}
+                max={max}
                 className="min-w-0 flex-1 bg-transparent px-2 text-center outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 defaultValue={value}
                 key={value}

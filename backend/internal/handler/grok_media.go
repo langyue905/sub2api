@@ -112,6 +112,13 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	}
 
 	contentType := c.GetHeader("Content-Type")
+	if endpoint.IsGenerationRequest() {
+		body, err = service.NormalizeMiniMaxH3Request(contentType, body)
+		if err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+	}
 	requestInfo := service.ParseGrokMediaRequest(contentType, body)
 	if endpoint == service.SeedanceEndpointCreate {
 		requestInfo, err = service.ParseSeedanceRequest(body)
@@ -346,7 +353,13 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 
 		account := selection.Account
 		if account.IsVideoPlugin() && endpoint.IsGenerationRequest() {
-			if err := h.gatewayService.ValidateVideoPluginPricing(requestCtx, apiKey, routingModel, requestInfo.Resolution); err != nil {
+			body, requestInfo, err = service.PrepareVideoPluginCreateRequest(account, contentType, body)
+			if err != nil {
+				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+				return
+			}
+			contentType = "application/json"
+			if err := h.gatewayService.ValidateVideoPluginPricing(requestCtx, apiKey, routingModel, requestInfo.Resolution, account.GetMappedModel(requestModel)); err != nil {
 				h.errorResponse(c, http.StatusServiceUnavailable, "video_pricing_not_configured", "Video model pricing must be configured by the administrator before generation")
 				return
 			}
@@ -648,6 +661,10 @@ func prepareGrokVideoCompletionBilling(
 		reqLog.Warn("grok_media.video_pending_billing_load_failed", zap.String("request_id", taskRequestID), zap.Error(loadErr))
 	}
 	if pending == nil {
+		if strings.EqualFold(statusResult.Model, "MiniMax-H3") || strings.EqualFold(statusResult.BillingModel, "MiniMax-H3") || strings.EqualFold(statusResult.UpstreamModel, "MiniMax-H3") {
+			reqLog.Error("grok_media.h3_billing_missing_create_snapshot", zap.String("request_id", taskRequestID))
+			return nil // Leave the claim available for recovery; never invent a low tier.
+		}
 		// Status omits resolution; without pending we would silently default to 480p and underbill.
 		// Allow billing only when official status carries duration (still may default resolution).
 		if statusResult.VideoDurationSeconds <= 0 {
@@ -662,6 +679,21 @@ func prepareGrokVideoCompletionBilling(
 			zap.Int("status_duration_seconds", statusResult.VideoDurationSeconds),
 			zap.String("note", "resolution falls back to default 480p; investigate pending store failures"),
 		)
+	}
+	if pending != nil && (strings.EqualFold(pending.Model, "MiniMax-H3") || strings.EqualFold(pending.UpstreamModel, "MiniMax-H3") || strings.EqualFold(pending.BillingModel, "MiniMax-H3") || strings.EqualFold(statusResult.Model, "MiniMax-H3") || strings.EqualFold(statusResult.BillingModel, "MiniMax-H3") || strings.EqualFold(statusResult.UpstreamModel, "MiniMax-H3")) {
+		switch pending.VideoResolution {
+		case "768p", "1080p", "2k", "4k":
+		default:
+			reqLog.Error("grok_media.h3_billing_invalid_create_resolution", zap.String("request_id", taskRequestID))
+			return nil
+		}
+		if pending.VideoDurationSeconds < 4 || pending.VideoDurationSeconds > 15 {
+			return nil
+		}
+		if err := h.gatewayService.ValidateMiniMaxH3Pricing(ctx, apiKey, firstNonEmptyString(pending.BillingModel, pending.Model), pending.VideoResolution); err != nil {
+			reqLog.Error("grok_media.h3_completion_pricing_unavailable", zap.String("request_id", taskRequestID))
+			return nil
+		}
 	}
 	claimed, err := h.gatewayService.ClaimGrokVideoBilling(ctx, taskRequestID, subject.UserID, apiKey.ID)
 	if err != nil {
@@ -684,7 +716,7 @@ func prepareGrokVideoCompletionBilling(
 		if strings.TrimSpace(pending.VideoResolution) != "" {
 			merged.VideoResolution = pending.VideoResolution
 		}
-		if merged.VideoDurationSeconds <= 0 {
+		if merged.VideoDurationSeconds <= 0 || strings.EqualFold(pending.Model, "MiniMax-H3") || strings.EqualFold(pending.UpstreamModel, "MiniMax-H3") {
 			merged.VideoDurationSeconds = pending.VideoDurationSeconds
 		}
 		if strings.TrimSpace(merged.ResponseID) == "" {

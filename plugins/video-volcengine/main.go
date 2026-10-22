@@ -45,7 +45,7 @@ const (
 // relays.  Keep this list explicit so arbitrary provider response fields are not
 // accidentally treated as downloadable media URLs.
 var compatibleVideoURLFields = []string{
-	"video.url", "video_url", "url", "result_url", "download_url",
+	"video.url", "video_url", "url", "result_url", "download_url", "metadata.url", "data.metadata.url",
 	"content.video_url", "content.url",
 	"data.0.url",
 	"data.video.url", "data.video_url", "data.url", "data.result_url", "data.download_url",
@@ -83,6 +83,7 @@ type seedanceTaskRoute struct {
 	StatusPath  string    `json:"status_path"`
 	ContentPath string    `json:"content_path"`
 	CreatedAt   time.Time `json:"created_at"`
+	MiniMaxH3   bool      `json:"minimax_h3,omitempty"`
 }
 
 type providerConfig struct {
@@ -539,7 +540,16 @@ func (s *server) createCompatibleVideo(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	createPath := provider.createPath
-	if provider.zhiqi {
+	h3 := isMiniMaxH3(model)
+	if h3 {
+		var err error
+		payload, _, err = normalizeMiniMaxH3Payload(payload, false)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+		createPath = waninterCreatePath
+	} else if provider.zhiqi {
 		var err error
 		payload, err = normalizeZhiqiVideoPayload(payload)
 		if err != nil {
@@ -556,6 +566,9 @@ func (s *server) createCompatibleVideo(w http.ResponseWriter, r *http.Request, p
 	}
 	statusPath := provider.statusPath
 	contentPath := provider.contentPath
+	if h3 {
+		statusPath, contentPath = defaultStatusPath, defaultContentPath
+	}
 	// 画布对 1.5 可能显式传入文档路径，但当前 waninter 账号的实际
 	// 兼容入口仍是 /v1/videos；按模型强制统一，避免只回退默认值的遗漏。
 	if !provider.zhiqi && provider.protocol == providerWaninter && isWaninterGrokVideoPayload(payload) {
@@ -565,7 +578,7 @@ func (s *server) createCompatibleVideo(w http.ResponseWriter, r *http.Request, p
 	}
 	seedanceRoute := !provider.zhiqi && provider.protocol == providerWaninter && isWaninterSeedancePath(createPath)
 	klingRoute := !provider.zhiqi && provider.protocol == providerWaninter && isWaninterNativeKlingModel(model) && isWaninterDefaultVideoPath(createPath)
-	if !provider.zhiqi && provider.protocol == providerWaninter {
+	if !h3 && !provider.zhiqi && provider.protocol == providerWaninter {
 		if klingRoute {
 			if hasCompatibleImages(payload) {
 				createPath = waninterKlingImagePath
@@ -606,6 +619,9 @@ func (s *server) createCompatibleVideo(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	id := firstJSONString(body, "id", "request_id", "task_id", "data.id", "data.request_id", "data.task_id")
+	if h3 {
+		id = firstJSONString(body, "task_id", "data.task_id", "id", "data.id")
+	}
 	if id == "" {
 		writeError(w, http.StatusBadGateway, "upstream_error", "compatible video provider returned no task id")
 		return
@@ -614,8 +630,8 @@ func (s *server) createCompatibleVideo(w http.ResponseWriter, r *http.Request, p
 	if result["status"] == "failed" && firstJSONString(body, "error.message", "error", "data.error.message") != "" {
 		result["error"] = firstJSONString(body, "error.message", "error", "data.error.message")
 	}
-	if seedanceRoute || klingRoute {
-		if err := s.storeTaskRoute(r, provider, id, seedanceTaskRoute{StatusPath: statusPath, ContentPath: contentPath, CreatedAt: time.Now()}); err != nil {
+	if seedanceRoute || klingRoute || h3 {
+		if err := s.storeTaskRoute(r, provider, id, seedanceTaskRoute{StatusPath: statusPath, ContentPath: contentPath, CreatedAt: time.Now(), MiniMaxH3: h3}); err != nil {
 			slog.Error("persist video task route failed", "error", err)
 		}
 	}
@@ -1029,6 +1045,9 @@ func (s *server) getCompatibleVideo(w http.ResponseWriter, r *http.Request, prov
 		return
 	}
 	result := normalizeCompatibleTask(body, id)
+	if s.isMiniMaxH3Task(r, provider, id) || isMiniMaxH3(firstJSONString(body, "model", "data.model")) {
+		result = normalizeMiniMaxH3Task(body, id)
+	}
 	if provider.nativeGrok {
 		switch result["status"] {
 		case "done":
@@ -1077,6 +1096,10 @@ func (s *server) getCompatibleVideoContent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	videoURL := compatibleVideoURL(statusBody)
+	h3 := s.isMiniMaxH3Task(r, provider, id) || isMiniMaxH3(firstJSONString(statusBody, "model", "data.model"))
+	if h3 {
+		videoURL = miniMaxH3VideoURL(statusBody)
+	}
 	if videoURL == "" && contentPath != statusPath {
 		contentURL := providerPath(provider.baseURL, contentPath, id)
 		contentReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, contentURL, nil)
@@ -1114,6 +1137,9 @@ func (s *server) getCompatibleVideoContent(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		videoURL = compatibleVideoURL(body)
+		if h3 {
+			videoURL = miniMaxH3VideoURL(body)
+		}
 		if videoURL == "" {
 			if message := firstJSONString(body, "error.message", "error", "message"); message != "" {
 				writeError(w, http.StatusBadGateway, "upstream_error", message)
@@ -1137,6 +1163,13 @@ func (s *server) getCompatibleVideoContent(w http.ResponseWriter, r *http.Reques
 	}
 	if value := strings.TrimSpace(r.Header.Get("Range")); value != "" {
 		req.Header.Set("Range", value)
+	}
+	// Provider-hosted files may need auth; never forward it to another origin.
+	if h3 {
+		origin, _ := url.Parse(provider.baseURL)
+		if origin != nil && origin.Scheme == validated.Scheme && strings.EqualFold(origin.Host, validated.Host) {
+			copyCompatibleAuthorization(req, r)
+		}
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {

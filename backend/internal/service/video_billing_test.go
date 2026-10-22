@@ -93,18 +93,20 @@ func TestNormalizeVideoModelPricesIsDeterministicAcrossAliasConflicts(t *testing
 
 func TestLookupVideoBillingResolutionReportsUnknownTiers(t *testing.T) {
 	t.Parallel()
-	for _, in := range []string{"480", "480p", "SD", "720", "hd", "1080", "full-hd", " fhd "} {
+	for _, in := range []string{"480", "480p", "SD", "720", "hd", "1080", "full-hd", " fhd ", "768p", "2K", "4k"} {
 		normalized, ok := LookupVideoBillingResolution(in)
 		require.True(t, ok, "input=%q", in)
 		require.NotEmpty(t, normalized)
 	}
-	for _, in := range []string{"", "4k", "1080i", "2160p", "potato"} {
+	for _, in := range []string{"", "8k", "1080i", "2160p", "potato"} {
 		normalized, ok := LookupVideoBillingResolution(in)
 		require.False(t, ok, "input=%q", in)
 		require.Empty(t, normalized)
 	}
-	// Runtime billing still needs a tier for unrecognized upstream values.
-	require.Equal(t, VideoBillingResolution480P, NormalizeVideoBillingResolutionOrDefault("4k"))
+	// Explicit unknown values must never become a lower priced tier.
+	require.Equal(t, "8k", NormalizeVideoBillingResolutionOrDefault("8k"))
+	require.Equal(t, "4k", NormalizeVideoBillingResolutionOrDefault("4k"))
+	require.Equal(t, VideoBillingResolution480P, NormalizeVideoBillingResolutionOrDefault(""))
 	require.Equal(t, VideoBillingResolution1080P, NormalizeVideoBillingResolutionOrDefault("full_hd"))
 }
 

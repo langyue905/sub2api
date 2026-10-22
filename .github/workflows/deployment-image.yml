@@ -6,6 +6,7 @@ on:
       - integration/v0.2.15-canvas-workbench
       - integration/v0.2.15-video-plugin
       - codex/video-https-upstream-0216
+      - codex/minimax-h3-full-adapter-20261022
     paths-ignore:
       - '**.md'
   workflow_dispatch:
@@ -30,7 +31,7 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Gateway and reference-media regression tests (no provider calls)
         working-directory: backend
-        run: go test ./internal/service ./internal/server/routes ./internal/handler -run 'Test.*(Video|Grok|Composite|ModelPlaza)' -count=1
+        run: go test -tags unit ./internal/service ./internal/server/routes ./internal/handler -run 'Test.*(Video|Grok|MiniMax|H3|Composite|ModelPlaza)' -count=1
       - name: Video plugin regression tests (mock providers only)
         working-directory: plugins/video-volcengine
         run: go test ./...
@@ -52,6 +53,7 @@ jobs:
         working-directory: frontend/workbenches/infinite-canvas
         run: |
           npm ci --legacy-peer-deps
+          node --experimental-strip-types --test tests/minimax-h3.test.mjs
           npm run typecheck
           npm run build
   image:
@@ -75,7 +77,7 @@ jobs:
         run: |
           suffix="canvas"
           version="$(cat backend/cmd/server/VERSION)-zsh-canvas"
-          if [[ "$GITHUB_REF_NAME" == "integration/v0.2.15-video-plugin" || "$GITHUB_REF_NAME" == "codex/video-https-upstream-0216" ]]; then
+          if [[ "$GITHUB_REF_NAME" == "integration/v0.2.15-video-plugin" || "$GITHUB_REF_NAME" == "codex/video-https-upstream-0216" || "$GITHUB_REF_NAME" == "codex/minimax-h3-full-adapter-20261022" ]]; then
             suffix="video"
             version="$(cat backend/cmd/server/VERSION)-zsh-video"
           fi

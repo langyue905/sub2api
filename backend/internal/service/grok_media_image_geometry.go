@@ -75,6 +75,10 @@ func assignGrokMediaResolution(value string, info *GrokMediaRequestInfo) {
 	if value == "" {
 		return
 	}
+	if isMiniMaxH3(info.Model) {
+		info.Resolution = value
+		return
+	}
 	if img := grokImagineImageResolution(value); img != "" {
 		info.ImageResolution = img
 		return
