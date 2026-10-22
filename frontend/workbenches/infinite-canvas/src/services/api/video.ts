@@ -132,7 +132,7 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     const h3 = isMiniMaxH3(model);
     // Validate everything before uploading media or submitting a billable create.
     const h3Options = h3 ? h3VideoOptions(config.vquality, config.size, config.videoSeconds, prompt) : null;
-    if (h3) validateH3References(references.length, options?.videos?.length || 0, options?.audios?.length || 0);
+    if (h3) validateH3References(references.length, options?.videos?.length || 0, options?.audios?.length || 0, config.vquality);
     const seedance = /^(doubao-)?seedance-/i.test(modelOptionName(model));
     if (!h3 && !seedance && options?.videos?.length) throw new Error(apiText("invalidReferenceVideo"));
     if (!h3 && !seedance && options?.audios?.length) throw new Error(apiText("invalidReferenceAudio"));

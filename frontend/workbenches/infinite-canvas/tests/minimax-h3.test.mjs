@@ -36,11 +36,21 @@ test('duration and prompt are checked before a paid submission', () => {
   assert.throws(() => h3VideoOptions('768', '16:9', '5', '   '));
 });
 test('reference limits and image prerequisite', () => {
-  validateH3References(0, 0, 0);
-  validateH3References(9, 3, 3);
-  for (const counts of [[10, 0, 0], [1, 4, 0], [1, 0, 4], [0, 1, 0], [0, 0, 1]]) assert.throws(() => validateH3References(...counts));
+  validateH3References(0, 0, 0, '768');
+  validateH3References(9, 3, 3, '1080');
+  for (const counts of [[10, 0, 0], [1, 4, 0], [1, 0, 4], [0, 1, 0], [0, 0, 1]]) assert.throws(() => validateH3References(...counts, '768'));
 });
 test('model identity supports channel-qualified names without matching legacy variants', () => {
   assert.equal(isMiniMaxH3('channel::MiniMax-H3'), true);
   for (const model of ['grok-video-1.5', 'Minimax-H3-768p-933-10s', '']) assert.equal(isMiniMaxH3(model), false);
+});
+
+test('2K/4K super-resolution requires an image before submission', () => {
+  for (const tier of ['2k', '4k']) {
+    for (const counts of [[0, 0, 0], [0, 1, 0], [0, 0, 1]]) {
+      assert.throws(() => validateH3References(...counts, tier), /超分至少需要一张参考图/);
+    }
+    validateH3References(1, 0, 0, tier);
+    validateH3References(9, 3, 3, tier);
+  }
 });

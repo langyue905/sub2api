@@ -36,11 +36,18 @@ describe('asynchronous video tasks', () => {
     ['4k', '9:16', '4K', '4k'],
   ])('submits H3 %s with its exact size and billing tier', async (vquality, size, expectedSize, resolution) => {
     post.mockResolvedValue({ data: { id: 'wrapper-id', data: { task_id: 'h3-task', id: 'secondary-id' } } })
-    const created = await createVideoGenerationTask({ ...config, model: 'MiniMax-H3', videoModel: 'MiniMax-H3', videoSeconds: '15', vquality, size }, 'camera move')
+    const image = { url: 'https://media.example.com/reference.png' }
+    const references = vquality.endsWith('k') ? [{ ...image, id: 'test-reference', name: 'reference.png', type: 'image/png', dataUrl: '' }] : []
+    const created = await createVideoGenerationTask({ ...config, model: 'MiniMax-H3', videoModel: 'MiniMax-H3', videoSeconds: '15', vquality, size }, 'camera move', references)
     expect(created.id).toBe('h3-task')
     expect(post).toHaveBeenCalledTimes(1)
     const body = post.mock.calls[0][1] as Record<string, unknown>
-    expect(body).toEqual({ model: 'MiniMax-H3', prompt: 'camera move', seconds: 15, resolution, size: expectedSize, ...(vquality.endsWith('k') ? { aspect_ratio: size } : {}) })
+    expect(body).toEqual({ model: 'MiniMax-H3', prompt: 'camera move', seconds: 15, resolution, size: expectedSize, ...(vquality.endsWith('k') ? { aspect_ratio: size, image } : {}) })
+  })
+
+  it.each(['2k', '4k'])('rejects image-free H3 %s before uploading or submitting', async (vquality) => {
+    await expect(createVideoGenerationTask({ ...config, model: 'MiniMax-H3', videoModel: 'MiniMax-H3', videoSeconds: '4', vquality }, 'camera move')).rejects.toThrow(/超分至少需要一张参考图/)
+    expect(post).not.toHaveBeenCalled()
   })
 
   it.each([

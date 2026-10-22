@@ -200,6 +200,9 @@ func normalizeMiniMaxH3Payload(in map[string]any, allowData bool) (map[string]an
 	if counts["images"] == 0 && (counts["reference_videos"] > 0 || counts["reference_audios"] > 0) {
 		return nil, "", fmt.Errorf("MiniMax-H3 video/audio references require at least one reference image")
 	}
+	if counts["images"] == 0 && (tier == "2k" || tier == "4k") {
+		return nil, "", fmt.Errorf("MiniMax-H3 2K/4K 超分至少需要一张参考图 (super-resolution requires at least one reference image)")
+	}
 	workflow := "text-to-video"
 	if counts["images"] > 0 {
 		workflow = "multi-reference"

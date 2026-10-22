@@ -19,7 +19,7 @@ func TestMiniMaxH3AliasCreatePricingAndSnapshot(t *testing.T) {
 	account := &Account{Credentials: map[string]any{"model_mapping": map[string]any{"public-video": "MiniMax-H3"}}}
 	svc := &OpenAIGatewayService{}
 	key := &APIKey{Group: &Group{VideoModelPrices: map[string]map[string]float64{"public-video": {"2k": .25}}}}
-	body, info, err := PrepareVideoPluginCreateRequest(account, "application/json", []byte(`{"model":"public-video","prompt":"test","resolution":"2k","aspect_ratio":"1:1","seconds":15}`))
+	body, info, err := PrepareVideoPluginCreateRequest(account, "application/json", []byte(`{"model":"public-video","prompt":"test","images":["https://media.example.com/image.png"],"resolution":"2k","aspect_ratio":"1:1","seconds":15}`))
 	require.NoError(t, err)
 	require.Equal(t, "public-video", info.Model)
 	require.Equal(t, "public-video", gjson.GetBytes(body, "model").String())
@@ -28,7 +28,7 @@ func TestMiniMaxH3AliasCreatePricingAndSnapshot(t *testing.T) {
 	require.NoError(t, svc.ValidateVideoPluginPricing(context.Background(), key, info.Model, info.Resolution, account.GetMappedModel(info.Model)))
 	key.Group.VideoModelPrices["public-video"]["2k"] = 0
 	require.Error(t, svc.ValidateVideoPluginPricing(context.Background(), key, info.Model, info.Resolution, account.GetMappedModel(info.Model)))
-	_, _, err = PrepareVideoPluginCreateRequest(account, "application/json", []byte(`{"model":"public-video","prompt":"test","resolution":"2160p"}`))
+	_, _, err = PrepareVideoPluginCreateRequest(account, "application/json", []byte(`{"model":"public-video","prompt":"test","images":["https://media.example.com/image.png"],"resolution":"2160p"}`))
 	require.Error(t, err)
 }
 
@@ -37,7 +37,7 @@ func TestMiniMaxH3BillingFromNormalizedRequest(t *testing.T) {
 	prices := map[string]float64{"768p": .12, "1080p": .20, "2k": .25, "4k": .30}
 	key := &APIKey{Group: &Group{VideoModelPrices: map[string]map[string]float64{"minimax-h3": prices}}}
 	for tier, price := range prices {
-		body, err := NormalizeMiniMaxH3Request("application/json", []byte(fmt.Sprintf(`{"model":"MiniMax-H3","prompt":"test","resolution":%q,"aspect_ratio":"1:1","seconds":15}`, tier)))
+		body, err := NormalizeMiniMaxH3Request("application/json", []byte(fmt.Sprintf(`{"model":"MiniMax-H3","prompt":"test","images":["https://media.example.com/image.png"],"resolution":%q,"aspect_ratio":"1:1","seconds":15}`, tier)))
 		require.NoError(t, err)
 		info := ParseGrokMediaRequest("application/json", body)
 		require.Equal(t, tier, info.Resolution)
@@ -72,7 +72,7 @@ func TestMiniMaxH3CreateNeverAutomaticallyRetries(t *testing.T) {
 			account := &Account{ID: 289, Platform: PlatformVideoPlugin, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key", "base_url": "http://video-plugin-test:8081", "provider_base_url": "https://vip.kkone.vip"}}
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "https://example.com/v1/videos", nil)
-			_, err := svc.ForwardVideoPlugin(context.Background(), c, account, GrokMediaEndpointVideosGenerations, "", []byte(`{"model":"MiniMax-H3","prompt":"test","resolution":"2k","aspect_ratio":"16:9"}`), "application/json")
+			_, err := svc.ForwardVideoPlugin(context.Background(), c, account, GrokMediaEndpointVideosGenerations, "", []byte(`{"model":"MiniMax-H3","prompt":"test","images":["https://media.example.com/image.png"],"resolution":"2k","aspect_ratio":"16:9"}`), "application/json")
 			var failover *UpstreamFailoverError
 			require.ErrorAs(t, err, &failover)
 			require.False(t, failover.ShouldRetryNextAccount())

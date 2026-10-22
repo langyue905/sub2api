@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -24,6 +25,12 @@ func TestMiniMaxH3ProviderContract(t *testing.T) {
 						in["reference_images"] = []any{map[string]any{"url": "https://media.example.com/image.png"}}
 					}
 					out, gotTier, err := normalizeMiniMaxH3Payload(in, false)
+					if i >= 2 && !images {
+						if err == nil || !strings.Contains(err.Error(), "reference image") {
+							t.Fatalf("super-resolution without image must be rejected: %#v %v", out, err)
+						}
+						return
+					}
 					if err != nil {
 						t.Fatal(err)
 					}
