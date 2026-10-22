@@ -42,6 +42,9 @@ jobs:
         with:
           node-version: 24
       - run: corepack enable && corepack prepare pnpm@9 --activate
+      - name: Install canvas dependencies for model selection regression
+        working-directory: frontend/workbenches/infinite-canvas
+        run: npm ci --legacy-peer-deps
       - name: Account and billing UI regression tests
         working-directory: frontend
         run: |
@@ -52,7 +55,6 @@ jobs:
       - name: Canvas type check and production build
         working-directory: frontend/workbenches/infinite-canvas
         run: |
-          npm ci --legacy-peer-deps
           node --experimental-strip-types --test tests/minimax-h3.test.mjs
           npm run typecheck
           npm run build
