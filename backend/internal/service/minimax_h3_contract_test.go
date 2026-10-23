@@ -20,7 +20,7 @@ func TestMiniMaxH3ProviderContract(t *testing.T) {
 			for _, images := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%s/images=%v", tier, ratio, images), func(t *testing.T) {
 					in := map[string]any{"model": "MiniMax-H3", "prompt": " camera move ", "resolution": tier, "aspect_ratio": ratio,
-						"clarity": "bad", "metadata": map[string]any{"multiple": 20}, "mode": "bad", "workflow_size": "bad", "audio": true, "prompt_enhance": true}
+						"clarity": "bad", "metadata": map[string]any{"multiple": 20}, "workflow_size": "bad", "audio": true, "prompt_enhance": true}
 					if images {
 						in["reference_images"] = []any{map[string]any{"url": "https://media.example.com/image.png"}}
 					}
@@ -72,6 +72,7 @@ func TestMiniMaxH3ProviderContract(t *testing.T) {
 
 func TestMiniMaxH3RejectsInvalidParameters(t *testing.T) {
 	cases := []map[string]any{
+		{"mode": "bad"}, {"mode": "first_last_frame"}, {"mode": "first_last_frame", "images": []string{"https://media.example.com/first.png"}},
 		{"prompt": " "}, {"resolution": "480p"}, {"resolution": "720p"}, {"resolution": "2160p"}, {"resolution": "4320p"},
 		{"resolution": "2k", "aspect_ratio": "auto"}, {"size": "864x480"}, {"size": "1440x1440"},
 		{"resolution": "2k", "size": "4K"}, {"resolution_name": "1080p"}, {"ratio": "1:1"},
@@ -110,6 +111,48 @@ func TestMiniMaxH3RejectsInvalidParameters(t *testing.T) {
 			if (err != nil) != (n > group.max) {
 				t.Fatalf("%s count=%d err=%v", group.key, n, err)
 			}
+		}
+	}
+}
+
+func TestMiniMaxH3OrderedFramesAnd933(t *testing.T) {
+	for _, frames := range []bool{false, true} {
+		images := []string{}
+		count := 9
+		if frames {
+			count = 2
+		}
+		for i := range count {
+			images = append(images, fmt.Sprintf("https://media.example.com/%d.png", i))
+		}
+		in := map[string]any{"model": "MiniMax-H3", "prompt": "transition", "seconds": 4, "size": "1376x768",
+			"images":           images,
+			"reference_videos": []string{"https://media.example.com/1.mp4", "https://media.example.com/2.mp4", "https://media.example.com/3.mp4"},
+			"reference_audios": []string{"https://media.example.com/1.mp3", "https://media.example.com/2.mp3", "https://media.example.com/3.mp3"}}
+		if frames {
+			in["mode"] = "first_last_frame"
+		}
+		out, _, err := normalizeMiniMaxH3Payload(in, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(out["images"], images) || out["workflow_id"] != "multi-reference" {
+			t.Fatalf("image order/workflow lost: %#v", out)
+		}
+		if frames && out["mode"] != "first_last_frame" {
+			t.Fatal("frame mode lost")
+		}
+		if !frames && out["mode"] != nil {
+			t.Fatal("ordinary references became first/last frames")
+		}
+		for _, key := range []string{"reference_videos", "reference_audios"} {
+			if !reflect.DeepEqual(out[key], in[key]) {
+				t.Fatalf("%s lost: %#v", key, out)
+			}
+		}
+		again, _, err := normalizeMiniMaxH3Payload(out, false)
+		if err != nil || !reflect.DeepEqual(out, again) {
+			t.Fatalf("second normalization changed the contract: %#v %v", again, err)
 		}
 	}
 }

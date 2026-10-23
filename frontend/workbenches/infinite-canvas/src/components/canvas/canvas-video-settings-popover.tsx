@@ -7,15 +7,20 @@ import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeL
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
+import type { ReferenceImage } from "@/types/image";
+import { isMiniMaxH3 } from "@/lib/minimax-h3";
+import { VideoFrameSelector } from "@/components/video-frame-selector";
+import { useTranslation } from "react-i18next";
 
 type CanvasVideoSettingsPopoverProps = {
     config: AiConfig;
+    images?: ReferenceImage[];
     onConfigChange: (key: keyof AiConfig, value: string) => void;
     buttonClassName?: string;
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
 };
 
-export function CanvasVideoSettingsPopover({ config, onConfigChange, buttonClassName, placement = "topLeft" }: CanvasVideoSettingsPopoverProps) {
+export function CanvasVideoSettingsPopover({ config, images = [], onConfigChange, buttonClassName, placement = "topLeft" }: CanvasVideoSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -43,7 +48,7 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, buttonClass
         };
     }, [open]);
 
-    const panel = open && buttonRect ? <VideoSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} /> : null;
+    const panel = open && buttonRect ? <VideoSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} images={images} onConfigChange={onConfigChange} /> : null;
 
     return (
         <>
@@ -65,6 +70,7 @@ function VideoSettingsPortal({
     placement,
     theme,
     config,
+    images,
     onConfigChange,
 }: {
     buttonRect: DOMRect;
@@ -72,9 +78,12 @@ function VideoSettingsPortal({
     placement: CanvasVideoSettingsPopoverProps["placement"];
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     config: AiConfig;
+    images: ReferenceImage[];
     onConfigChange: (key: keyof AiConfig, value: string) => void;
 }) {
-    const width = 356;
+    const { i18n } = useTranslation();
+    const zh = i18n.language.startsWith("zh");
+    const width = Math.min(356, window.innerWidth - 24);
     const gap = 8;
     const margin = 12;
     const alignRight = placement?.endsWith("Right");
@@ -105,6 +114,12 @@ function VideoSettingsPortal({
             onClick={(event) => event.stopPropagation()}
         >
             <VideoSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" />
+            {isMiniMaxH3(config.videoModel || config.model) && config.videoMode === "first_last_frame" ? <>
+                <p className="mt-3 text-xs opacity-70">{zh ? "先将图片节点连接到此节点，再选择首帧和尾帧。" : "Connect image nodes, then select the first and last frames."}</p>
+                <VideoFrameSelector images={images} firstFrameId={config.firstFrameId} lastFrameId={config.lastFrameId} onChange={(patch) => {
+                    for (const role of ["firstFrameId", "lastFrameId"] as const) if (role in patch) onConfigChange(role, patch[role] || "");
+                }} />
+            </> : null}
         </div>,
         document.body,
     );

@@ -25,4 +25,11 @@ describe('canvas video model selection', () => {
   it('uses the configured default for a new video node', () => {
     expect(buildGenerationConfig(config, undefined, 'video').videoModel).toBe(config.videoModel)
   })
+  it('preserves first/last mode through saved config and node settings without sharing frame roles', () => {
+    useConfigStore.getState().updateConfig('videoMode', 'first_last_frame')
+    expect(useConfigStore.getState().config.videoMode).toBe('first_last_frame')
+    const node = { type: CanvasNodeType.Video, metadata: { model: 'channel::MiniMax-H3', videoMode: 'first_last_frame', firstFrameId: 'first', lastFrameId: 'last' } } as CanvasNodeData
+    expect(buildGenerationConfig(config, node, 'video')).toMatchObject({ videoMode: 'first_last_frame', firstFrameId: 'first', lastFrameId: 'last' })
+    expect(buildGenerationConfig({ ...config, firstFrameId: 'another-node' }, undefined, 'video').firstFrameId).toBeUndefined()
+  })
 })

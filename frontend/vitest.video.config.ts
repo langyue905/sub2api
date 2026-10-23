@@ -6,5 +6,5 @@ export default defineConfig({
     '@': resolve(__dirname, 'workbenches/infinite-canvas/src'),
     'axios': resolve(__dirname, 'node_modules/axios/index.js'),
   } },
-  test: { environment: 'node', include: ['workbenches/infinite-canvas/tests/video-task.test.ts', 'workbenches/infinite-canvas/tests/h3-model-selection.test.ts'] },
+  test: { environment: 'node', include: ['workbenches/infinite-canvas/tests/video-task.test.ts', 'workbenches/infinite-canvas/tests/h3-model-selection.test.ts', 'workbenches/infinite-canvas/tests/video-references.test.ts'] },
 })

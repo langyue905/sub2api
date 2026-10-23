@@ -40,8 +40,12 @@ func TestMiniMaxH3CreateRestartQueryDownload(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 						t.Fatal(err)
 					}
-					if payload["size"] != "2K" || payload["resolution"] != nil || payload["workflow_id"] != "cf-multi-reference" {
+					if payload["size"] != "1376x768" || payload["resolution"] != nil || payload["workflow_id"] != "multi-reference" || payload["mode"] != "first_last_frame" {
 						t.Errorf("incorrect payload: %#v", payload)
+					}
+					images, ok := payload["images"].([]any)
+					if !ok || len(images) != 2 || images[0] != "https://media.example.com/first.png" || images[1] != "https://media.example.com/last.png" {
+						t.Fatalf("frame order lost: %#v", payload)
 					}
 					writeJSON(w, 200, map[string]any{"id": "wrong-id", "data": map[string]any{"task_id": "h3-task", "status": "queued"}})
 				case "/v1/videos/h3-task":
@@ -88,7 +92,7 @@ func TestMiniMaxH3CreateRestartQueryDownload(t *testing.T) {
 				srv.routes().ServeHTTP(w, req)
 				return w
 			}
-			created := request("POST", "", `{"model":"MiniMax-H3","prompt":"test","size":"2K","aspect_ratio":"16:9","images":["https://media.example.com/image.png"]}`)
+			created := request("POST", "", `{"model":"MiniMax-H3","prompt":"test","mode":"first_last_frame","seconds":4,"size":"1376x768","images":["https://media.example.com/first.png","https://media.example.com/last.png"]}`)
 			if created.Code != 200 || !strings.Contains(created.Body.String(), `"id":"h3-task"`) {
 				t.Fatalf("create: %d %s", created.Code, created.Body.String())
 			}

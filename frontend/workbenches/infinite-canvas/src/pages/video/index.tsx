@@ -9,7 +9,12 @@ import { useTranslation } from "react-i18next";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
-import { isMiniMaxH3 } from "@/lib/minimax-h3";
+import { isMiniMaxH3, validateH3References } from "@/lib/minimax-h3";
+import { normalizeVideoMode, selectVideoFrameImages } from "@/lib/video-references";
+import { VideoFrameSelector } from "@/components/video-frame-selector";
+import { VideoMediaReferences } from "@/components/video-media-references";
+import { restoreReferenceMedia, serializeReferenceMedia } from "@/services/video-reference-history";
+import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { VideoSettingsPanel, videoResolutionLabel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { clampVideoSeconds } from "@/lib/media-size";
@@ -52,6 +57,8 @@ type GenerationLog = {
     model: string;
     config: GenerationLogConfig;
     references: ReferenceImage[];
+    referenceVideos: ReferenceVideo[];
+    referenceAudios: ReferenceAudio[];
     durationMs: number;
     size: string;
     resolution: string;
@@ -63,7 +70,7 @@ type GenerationLog = {
     failureSource?: "upstream";
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode" | "firstFrameId" | "lastFrameId">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
@@ -88,6 +95,10 @@ export default function VideoPage() {
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
+    const [referenceVideos, setReferenceVideos] = useState<ReferenceVideo[]>([]);
+    const [referenceAudios, setReferenceAudios] = useState<ReferenceAudio[]>([]);
+    const [frameSelection, setFrameSelection] = useState<{ firstFrameId?: string; lastFrameId?: string }>({});
+    const [mediaBusy, setMediaBusy] = useState({ video: false, audio: false, image: false });
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
     const [running, setRunning] = useState(false);
@@ -104,7 +115,10 @@ export default function VideoPage() {
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const maxReferenceImages = isMiniMaxH3(model) ? 9 : 7;
-    const canGenerate = Boolean(prompt.trim());
+    const firstLastFrame = isMiniMaxH3(model) && effectiveConfig.videoMode === "first_last_frame";
+    const supportsMedia = isMiniMaxH3(model) || /^(doubao-)?seedance-/i.test(modelOptionLabel(effectiveConfig, model));
+    const canGenerate = Boolean(prompt.trim()) && !Object.values(mediaBusy).some(Boolean);
+    const uploading = Object.values(mediaBusy).some(Boolean);
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -127,17 +141,23 @@ export default function VideoPage() {
     }, []);
 
     const addReferences = async (files?: FileList | null) => {
+        if (uploading) return;
+        setMediaBusy((value) => ({ ...value, image: true }));
+        try {
         const selectedFiles = Array.from(files || []);
         const unsupported = selectedFiles.filter((file) => !file.type.startsWith("image/"));
         if (unsupported.length) message.warning(t("videoWorkbench.unsupportedFiles"));
         const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/")).slice(0, Math.max(0, maxReferenceImages - references.length));
         const nextReferences = await Promise.all(
             imageFiles.map(async (file) => {
+                if (!file.size || file.size > 32 * 1024 * 1024) throw new Error("单个素材不能为空，最大32 MiB");
                 const image = await uploadImage(file);
                 return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
             }),
         );
         setReferences((value) => [...value, ...nextReferences].slice(0, maxReferenceImages));
+        } catch (error) { message.error(error instanceof Error ? error.message : String(error)); }
+        finally { setMediaBusy((value) => ({ ...value, image: false })); }
     };
 
     const handleReferenceDragEnter = (event: DragEvent<HTMLDivElement>) => {
@@ -160,6 +180,8 @@ export default function VideoPage() {
     };
 
     const addReferencesFromClipboard = async () => {
+        if (uploading) return;
+        setMediaBusy((value) => ({ ...value, image: true }));
         try {
             const items = await navigator.clipboard.read();
             const blobs = await Promise.all(items.flatMap((item) => item.types.filter((type) => type.startsWith("image/")).map((type) => item.getType(type))));
@@ -169,15 +191,15 @@ export default function VideoPage() {
             }
             const nextReferences = await Promise.all(
                 blobs.slice(0, Math.max(0, maxReferenceImages - references.length)).map(async (blob, index) => {
+                    if (!blob.size || blob.size > 32 * 1024 * 1024) throw new Error("单个素材不能为空，最大32 MiB");
                     const image = await uploadImage(blob);
                     return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
                 }),
             );
             setReferences((value) => [...value, ...nextReferences].slice(0, maxReferenceImages));
             message.success(t("videoWorkbench.clipboardAdded", { count: nextReferences.length }));
-        } catch {
-            message.error(t("videoWorkbench.clipboardEmpty"));
-        }
+        } catch (error) { message.error(error instanceof Error ? error.message : t("videoWorkbench.clipboardEmpty")); }
+        finally { setMediaBusy((value) => ({ ...value, image: false })); }
     };
     const generate = async () => {
         const snapshot = buildRequestSnapshot();
@@ -193,11 +215,11 @@ export default function VideoPage() {
         const controller = new AbortController();
         creationControllerRef.current = controller;
         let handedToPolling = false;
-        let log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, durationMs: 0, status: "pending" });
+        let log = { ...buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, durationMs: 0, status: "pending" }), referenceVideos: snapshot.videos, referenceAudios: snapshot.audios };
         try {
             // Persist before POST. Reloading an uncertain submission must never POST again.
             await saveLog(log, false);
-            const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, { signal: controller.signal });
+            const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, { signal: controller.signal, videos: snapshot.videos, audios: snapshot.audios });
             log = { ...log, task };
             await saveLog(log, false);
             throwIfAborted(controller.signal);
@@ -236,7 +258,17 @@ export default function VideoPage() {
             openConfigDialog(true);
             return null;
         }
-        return { text, config: buildVideoConfig(effectiveConfig, model), references: [...references] };
+        const requestConfig = { ...buildVideoConfig(effectiveConfig, model), ...frameSelection };
+        try {
+            if (isMiniMaxH3(model)) {
+                const images = selectVideoFrameImages(references, requestConfig.videoMode, frameSelection.firstFrameId, frameSelection.lastFrameId);
+                validateH3References(images.length, referenceVideos.length, referenceAudios.length, requestConfig.vquality, requestConfig.videoMode);
+            }
+            if (!supportsMedia && (referenceVideos.length || referenceAudios.length)) throw new Error(videoText("当前模型不支持音视频参考，请移除素材或更换模型。", "Remove media references or select a model that supports them."));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : String(error)); return null;
+        }
+        return { text, config: requestConfig, references: [...references], videos: [...referenceVideos], audios: [...referenceAudios] };
     };
 
     const retryResult = () => {
@@ -272,18 +304,26 @@ export default function VideoPage() {
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
+        if (uploading) return;
         if (payload.kind === "text") {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
             const stored = await uploadImage(payload.dataUrl);
             setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }].slice(0, maxReferenceImages));
+        } else if (payload.kind === "video") {
+            if (referenceVideos.length >= 3) { message.warning(videoText("参考视频最多3个", "Maximum 3 reference videos")); return; }
+            setReferenceVideos((items) => [...items, { id: nanoid(), name: payload.title, type: "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height }].slice(0, 3));
         }
         setAssetPickerOpen(false);
     };
 
     const createSession = () => {
+        if (uploading) { message.info(videoText("素材上传中，请稍候。", "Wait for the reference upload to finish.")); return; }
         setPrompt("");
         setReferences([]);
+        setReferenceVideos([]);
+        setReferenceAudios([]);
+        setFrameSelection({});
         setResults([]);
         setElapsedMs(0);
         setStartedAt(0);
@@ -391,10 +431,14 @@ export default function VideoPage() {
     };
 
     const previewGenerationLog = (log: GenerationLog) => {
+        if (uploading) { message.info(videoText("素材上传中，请稍候。", "Wait for the reference upload to finish.")); return; }
         setPreviewLog(log);
         setLogsOpen(false);
         setPrompt(log.prompt);
         setReferences(log.references || []);
+        setReferenceVideos(log.referenceVideos || []);
+        setReferenceAudios(log.referenceAudios || []);
+        setFrameSelection({ firstFrameId: log.config.firstFrameId, lastFrameId: log.config.lastFrameId });
         if (log.config.videoModel || log.model) updateConfig("videoModel", log.config.videoModel || log.model);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.vquality) updateConfig("vquality", log.config.vquality);
@@ -470,14 +514,33 @@ export default function VideoPage() {
                                             <img src={previewUrlFor(item.storageKey) || item.dataUrl} alt={item.name} className="size-full object-cover" />
                                             <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{index + 1}</span>
                                             <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
-                                            <button type="button" className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => setReferences((value) => value.filter((ref) => ref.id !== item.id))} aria-label={t("videoWorkbench.removeImage")}>
+                                            <button type="button" className="absolute right-1 top-1 flex size-6 items-center justify-center rounded bg-black/60 text-white" onClick={() => setReferences((value) => value.filter((ref) => ref.id !== item.id))} aria-label={t("videoWorkbench.removeImage")}>
                                                 <Trash2 className="size-3.5" />
                                             </button>
                                         </div>
                                     ))}
-                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">{referenceDragTarget ? t("videoWorkbench.dropReferences") : t("videoWorkbench.noImages")}</div> : null}
+                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">{referenceDragTarget ? t("videoWorkbench.dropReferences") : t("videoWorkbench.noImages", { count: maxReferenceImages })}</div> : null}
                                 </div>
                             </div>
+
+                            {firstLastFrame ? <VideoFrameSelector disabled={uploading} images={references} {...frameSelection} onChange={(patch) => setFrameSelection((value) => ({ ...value, ...patch }))} onUpload={async (role, file) => {
+                                if (uploading) return;
+                                setMediaBusy((value) => ({ ...value, image: true }));
+                                try {
+                                    if (references.length >= maxReferenceImages) throw new Error(videoText("请先移除一张参考图再上传。", "Remove an image before uploading another."));
+                                    if (!file.size || file.size > 32 * 1024 * 1024) throw new Error("单个素材不能为空，最大32 MiB");
+                                    const stored = await uploadImage(file);
+                                    const image = { id: nanoid(), name: file.name, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey };
+                                    setReferences((items) => [...items, image].slice(0, maxReferenceImages));
+                                    setFrameSelection((value) => ({ ...value, [role]: image.id }));
+                                } catch (error) { message.error(error instanceof Error ? error.message : String(error)); }
+                                finally { setMediaBusy((value) => ({ ...value, image: false })); }
+                            }} /> : null}
+                            {supportsMedia || referenceVideos.length || referenceAudios.length ? <div className="space-y-2">
+                                <p className="text-xs text-stone-500">{isMiniMaxH3(model) ? videoText("MiniMax-H3 支持9图、3音频、3参考视频；音视频参考需至少一张图片。单个素材最大32 MiB。", "MiniMax-H3: 9 images, 3 audio, 3 videos; media references require an image. Maximum 32 MiB per file.") : videoText("支持参考音视频，具体数量以上游模型能力为准。单个素材最大32 MiB。", "Media limits depend on the selected model. Maximum 32 MiB per file.")}</p>
+                                <VideoMediaReferences kind="video" items={referenceVideos} onChange={setReferenceVideos} onBusyChange={(busy) => setMediaBusy((value) => ({ ...value, video: busy }))} />
+                                <VideoMediaReferences kind="audio" items={referenceAudios} onChange={setReferenceAudios} onBusyChange={(busy) => setMediaBusy((value) => ({ ...value, audio: busy }))} />
+                            </div> : null}
 
                             <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
@@ -756,6 +819,8 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         model: log.model || config.videoModel || "",
         config,
         references,
+        referenceVideos: await restoreReferenceMedia(log.referenceVideos),
+        referenceAudios: await restoreReferenceMedia(log.referenceAudios),
         durationMs: log.durationMs || 0,
         size: log.size || config.size || "",
         resolution: normalizeResolution(log.resolution || config.vquality || ""),
@@ -772,6 +837,8 @@ function serializeLog(log: GenerationLog): GenerationLog {
     return {
         ...log,
         references: log.references.map((item) => ({ ...item, dataUrl: item.storageKey ? "" : item.dataUrl })),
+        referenceVideos: serializeReferenceMedia(log.referenceVideos),
+        referenceAudios: serializeReferenceMedia(log.referenceAudios),
         video: log.video?.storageKey ? { ...log.video, url: "" } : log.video,
     };
 }
@@ -803,7 +870,9 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         videoSeconds: log.config?.videoSeconds || log.seconds || "",
         videoGenerateAudio: log.config?.videoGenerateAudio || "true",
         videoWatermark: log.config?.videoWatermark || "false",
-        videoMode: log.config?.videoMode === "reference" ? "reference" : "frames",
+        videoMode: normalizeVideoMode(log.config?.videoMode),
+        firstFrameId: log.config?.firstFrameId,
+        lastFrameId: log.config?.lastFrameId,
     };
 }
 
@@ -816,7 +885,9 @@ function buildLog({ prompt, model, config, references, durationMs, status, task,
         videoSeconds: config.videoSeconds,
         videoGenerateAudio: config.videoGenerateAudio,
         videoWatermark: config.videoWatermark,
-        videoMode: config.videoMode === "reference" ? "reference" : "frames",
+        videoMode: normalizeVideoMode(config.videoMode),
+        firstFrameId: config.firstFrameId,
+        lastFrameId: config.lastFrameId,
     };
     return {
         id: nanoid(),
@@ -827,6 +898,8 @@ function buildLog({ prompt, model, config, references, durationMs, status, task,
         model,
         config: logConfig,
         references,
+        referenceVideos: [],
+        referenceAudios: [],
         durationMs,
         size: logConfig.size,
         resolution: logConfig.vquality,
@@ -848,7 +921,7 @@ function buildVideoConfig(config: AiConfig, model: string): AiConfig {
         vquality: normalizeResolution(config.vquality),
         videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, true)),
         videoWatermark: String(boolConfig(config.videoWatermark, false)),
-        videoMode: config.videoMode === "reference" ? "reference" : "frames",
+        videoMode: normalizeVideoMode(config.videoMode),
     };
 }
 

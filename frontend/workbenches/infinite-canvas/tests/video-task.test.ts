@@ -42,7 +42,32 @@ describe('asynchronous video tasks', () => {
     expect(created.id).toBe('h3-task')
     expect(post).toHaveBeenCalledTimes(1)
     const body = post.mock.calls[0][1] as Record<string, unknown>
-    expect(body).toEqual({ model: 'MiniMax-H3', prompt: 'camera move', seconds: 15, resolution, size: expectedSize, ...(vquality.endsWith('k') ? { aspect_ratio: size, image } : {}) })
+    expect(body).toEqual({ model: 'MiniMax-H3', prompt: 'camera move', seconds: 15, resolution, size: expectedSize, ...(vquality.endsWith('k') ? { aspect_ratio: size, images: [image.url] } : {}) })
+  })
+
+  it('submits explicitly assigned H3 frames in role order and preserves audio/video references', async () => {
+    post.mockResolvedValue({ data: { task_id: 'h3-frames' } })
+    const references = ['last', 'unused', 'first'].map((id) => ({ id, name: id, type: 'image/png', dataUrl: `https://media.example.com/${id}.png` }))
+    const videos = [1, 2, 3].map((id) => ({ id: String(id), name: 'video', type: 'video/mp4', url: `https://media.example.com/${id}.mp4` }))
+    const audios = [1, 2, 3].map((id) => ({ id: String(id), name: 'audio', type: 'audio/mpeg', url: `https://media.example.com/${id}.mp3` }))
+    await createVideoGenerationTask({ ...config, videoModel: 'MiniMax-H3', videoMode: 'first_last_frame', firstFrameId: 'first', lastFrameId: 'last', videoSeconds: '4', vquality: '768' }, 'transition', references, { videos, audios })
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(post.mock.calls[0][1]).toEqual({ model: 'MiniMax-H3', prompt: 'transition', seconds: 4, resolution: '768p', size: '1376x768', mode: 'first_last_frame', images: ['https://media.example.com/first.png', 'https://media.example.com/last.png'], reference_videos: videos.map((v) => v.url), reference_audios: audios.map((a) => a.url) })
+  })
+
+  it('rejects a removed frame before uploading or submitting', async () => {
+    await expect(createVideoGenerationTask({ ...config, videoModel: 'MiniMax-H3', videoMode: 'first_last_frame', firstFrameId: 'removed', lastFrameId: 'last', videoSeconds: '4', vquality: '768' }, 'transition', [{ id: 'last', name: 'last', type: 'image/png', dataUrl: 'https://media.example.com/last.png' }])).rejects.toThrow(/首帧和尾帧/)
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('submits all 933 ordinary references without a frame mode', async () => {
+    post.mockResolvedValue({ data: { id: 'h3-933' } })
+    const images = Array.from({ length: 9 }, (_, i) => ({ id: String(i), name: 'image', type: 'image/png', dataUrl: `https://media.example.com/${i}.png` }))
+    const media = Array.from({ length: 3 }, (_, i) => ({ id: String(i), name: 'media', type: 'video/mp4', url: `https://media.example.com/${i}.mp4` }))
+    await createVideoGenerationTask({ ...config, videoModel: 'MiniMax-H3', videoMode: 'reference', videoSeconds: '4', vquality: '768' }, 'transition', images, { videos: media, audios: media.map((m) => ({ ...m, type: 'audio/mpeg', url: m.url.replace('.mp4', '.mp3') })) })
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(post.mock.calls[0][1]).toMatchObject({ images: images.map((i) => i.dataUrl), reference_videos: media.map((v) => v.url), reference_audios: media.map((v) => v.url.replace('.mp4', '.mp3')) })
+    expect(post.mock.calls[0][1]).not.toHaveProperty('mode')
   })
 
   it.each(['2k', '4k'])('rejects image-free H3 %s before uploading or submitting', async (vquality) => {

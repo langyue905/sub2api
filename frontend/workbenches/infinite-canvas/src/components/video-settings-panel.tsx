@@ -51,6 +51,13 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="text-lg font-semibold">{t("settingsPanels.video.title")}</div> : null}
                 {h3 && !selection.valid ? <div role="alert" className="text-sm">请重新选择 MiniMax-H3 清晰度和画幅。</div> : null}
+                {h3 ? <SettingGroup title="参考模式" color={theme.node.muted}>
+                    <div className="grid grid-cols-2 gap-2">
+                        <OptionPill selected={config.videoMode !== "first_last_frame"} theme={theme} onClick={() => onConfigChange("videoMode", "reference")}>普通多参考</OptionPill>
+                        <OptionPill selected={config.videoMode === "first_last_frame"} theme={theme} onClick={() => onConfigChange("videoMode", "first_last_frame")}>首尾帧</OptionPill>
+                    </div>
+                    <p className="text-xs" style={{ color: theme.node.muted }}>首尾帧按首帧、尾帧顺序提交两张图片。已验证 768P；其他规格以上游能力为准。</p>
+                </SettingGroup> : null}
                 <SettingGroup title={t("settingsPanels.video.quality")} color={theme.node.muted}>
                     <div className="grid grid-cols-4 gap-2.5">
                         {(h3 ? h3Resolutions : resolutionOptions).map((item) => (

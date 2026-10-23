@@ -194,7 +194,7 @@ export default {
         removeVideo: "移除参考视频",
         removeAudio: "移除参考音频",
         dropReferences: "松开即可上传参考资产",
-        noImages: "暂无参考图，可拖入文件，最多 7 张",
+        noImages: "暂无参考图，可拖入文件，最多 {{count}} 张",
         noVideos: "暂无参考视频，可拖入文件，最多 3 个",
         noAudio: "暂无参考音频，可拖入文件，最多 3 个，mp3/wav，单个 15MB 内",
         unsupportedFiles: "已忽略不支持的参考资产，请使用图片、mp4/mov 视频或 mp3/wav 音频",

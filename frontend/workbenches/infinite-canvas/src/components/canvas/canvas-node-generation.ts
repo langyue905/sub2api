@@ -6,6 +6,7 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 import { getGenerationResourceNodes, getGroupResourceNodes } from "@/lib/canvas/canvas-resource-references";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
+import type { AiConfig } from "@/stores/use-config-store";
 
 export type NodeGenerationContext = {
     prompt: string;
@@ -37,11 +38,18 @@ type NodeGenerationGroupInput = {
 
 export type NodeGenerationInput = NodeGenerationResourceInput | NodeGenerationGroupInput;
 
-export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string): NodeGenerationContext {
+export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string, config?: Pick<AiConfig, "videoMode" | "firstFrameId" | "lastFrameId">): NodeGenerationContext {
     const inputs = buildNodeGenerationInputs(nodeId, nodes, connections);
     const sourceNode = nodes.find((node) => node.id === nodeId);
     if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
-        return buildComposerGenerationContext(inputs, prompt);
+        const context = buildComposerGenerationContext(inputs, prompt);
+        // Explicit frame roles are selections too, even without a composer mention.
+        if (config?.videoMode === "first_last_frame") {
+            const selected = generationInputImages(inputs).filter((image) => image.id === config.firstFrameId || image.id === config.lastFrameId);
+            context.referenceImages = [...new Map([...context.referenceImages, ...selected].map((image) => [image.id, image])).values()];
+            context.imageCount = context.referenceImages.length;
+        }
+        return context;
     }
 
     const resourceInputs = flattenGenerationInputs(inputs);
@@ -138,6 +146,10 @@ export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[
 function flattenGenerationInputs(inputs: NodeGenerationInput[]) {
     const resources = inputs.flatMap((input) => (input.type === "group" ? input.children : [input]));
     return [...new Map(resources.map((input) => [input.nodeId, input])).values()];
+}
+
+export function generationInputImages(inputs: NodeGenerationInput[]) {
+    return flattenGenerationInputs(inputs).flatMap((input) => input.image ? [input.image] : []);
 }
 
 function readNodeGenerationResource(node: CanvasNodeData): NodeGenerationResourceInput[] {

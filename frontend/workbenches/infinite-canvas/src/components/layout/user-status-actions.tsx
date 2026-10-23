@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { Tooltip } from "antd";
-import { Keyboard, Settings2 } from "lucide-react";
+import { ArrowLeft, Keyboard, Settings2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
@@ -29,6 +29,9 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
 
     return (
         <div className="inline-flex shrink-0 items-center gap-1">
+            <a href="/dashboard" target="_top" aria-label={locale === "zh-CN" ? "返回中转站" : "Back to platform"} title={locale === "zh-CN" ? "返回中转站" : "Back to platform"} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-2 text-xs hover:bg-black/5 dark:hover:bg-white/10" style={iconStyle}>
+                <ArrowLeft className="size-3.5" /><span className="hidden sm:inline">{locale === "zh-CN" ? "返回中转站" : "Back to platform"}</span>
+            </a>
             {showConfig ? (
                 <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label={t("navigation.config")} title={t("navigation.config")}>
                     <Settings2 className="size-4" />

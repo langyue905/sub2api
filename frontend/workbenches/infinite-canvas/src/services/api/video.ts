@@ -1,6 +1,7 @@
 import axios from "axios";
 
 import i18n from "@/i18n";
+import { selectVideoFrameImages } from "@/lib/video-references";
 import { h3VideoOptions, isMiniMaxH3, validateH3References } from "@/lib/minimax-h3";
 import { clampVideoSeconds, inferVideoRatio, parseVideoResolution } from "@/lib/media-size";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
@@ -130,9 +131,10 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
     const requestKey = await videoTaskRequestKey(config);
     const h3 = isMiniMaxH3(model);
+    if (h3) references = selectVideoFrameImages(references, config.videoMode, config.firstFrameId, config.lastFrameId);
     // Validate everything before uploading media or submitting a billable create.
     const h3Options = h3 ? h3VideoOptions(config.vquality, config.size, config.videoSeconds, prompt) : null;
-    if (h3) validateH3References(references.length, options?.videos?.length || 0, options?.audios?.length || 0, config.vquality);
+    if (h3) validateH3References(references.length, options?.videos?.length || 0, options?.audios?.length || 0, config.vquality, config.videoMode);
     const seedance = /^(doubao-)?seedance-/i.test(modelOptionName(model));
     if (!h3 && !seedance && options?.videos?.length) throw new Error(apiText("invalidReferenceVideo"));
     if (!h3 && !seedance && options?.audios?.length) throw new Error(apiText("invalidReferenceAudio"));
@@ -152,8 +154,13 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     const aspectRatio = inferVideoRatio(config.size);
     if (h3Options) { delete body.duration; Object.assign(body, h3Options); }
     else if (aspectRatio !== "auto") body.aspect_ratio = aspectRatio;
-    if (imageUrls.length === 1) body.image = { url: imageUrls[0] };
-    if (imageUrls.length > 1) body.reference_images = imageUrls.map((url) => ({ url }));
+    if (h3) {
+        if (imageUrls.length) body.images = imageUrls;
+        if (config.videoMode === "first_last_frame") body.mode = "first_last_frame";
+    } else {
+        if (imageUrls.length === 1) body.image = { url: imageUrls[0] };
+        if (imageUrls.length > 1) body.reference_images = imageUrls.map((url) => ({ url }));
+    }
     if (seedance || h3) {
         if (seedance) body.generate_audio = config.videoGenerateAudio !== "false";
         const videos: string[] = [];

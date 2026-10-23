@@ -210,6 +210,12 @@ func normalizeMiniMaxH3Payload(in map[string]any, allowData bool) (map[string]an
 			workflow = "cf-multi-reference"
 		}
 	}
+	if mode := text("mode"); mode != "" {
+		if mode != "first_last_frame" || counts["images"] != 2 {
+			return nil, "", fmt.Errorf("MiniMax-H3 first_last_frame requires exactly two ordered reference images")
+		}
+		out["mode"] = mode
+	}
 	if given := text("workflow_id"); given != "" && given != workflow {
 		return nil, "", fmt.Errorf("MiniMax-H3 workflow conflicts with references or size")
 	}

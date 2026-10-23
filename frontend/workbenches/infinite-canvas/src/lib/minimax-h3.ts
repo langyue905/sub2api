@@ -56,7 +56,8 @@ export function h3VideoOptions(quality: string, size: string, duration: string, 
     if (size.includes("x") && h3Size(tier, ratio) !== size) throw new Error("MiniMax-H3 尺寸与清晰度冲突，请重新选择画幅。");
     return { seconds, resolution: tier.endsWith("k") ? tier : `${tier}p`, size: h3Size(tier, ratio), ...(tier.endsWith("k") ? { aspect_ratio: ratio } : {}) };
 }
-export function validateH3References(images: number, videos: number, audios: number, quality: string) {
+export function validateH3References(images: number, videos: number, audios: number, quality: string, mode?: string) {
+    if (mode === "first_last_frame" && images !== 2) throw new Error("MiniMax-H3 首尾帧模式需要分别选择一张首帧和一张尾帧。");
     if (images > 9 || videos > 3 || audios > 3) throw new Error("MiniMax-H3 最多支持 9 张图片、3 段视频和 3 段音频。");
     if (!images && ["2k", "4k"].includes(h3Tier(quality))) throw new Error("MiniMax-H3 2K/4K 超分至少需要一张参考图，请添加参考图后提交。");
     if (!images && (videos || audios)) throw new Error("MiniMax-H3 使用视频或音频参考时，至少需要一张参考图。");

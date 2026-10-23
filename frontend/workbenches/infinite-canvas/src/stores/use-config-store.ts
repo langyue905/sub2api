@@ -1,4 +1,5 @@
 import { isMiniMaxH3 } from "@/lib/minimax-h3";
+import { normalizeVideoMode } from "@/lib/video-references";
 import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -15,6 +16,7 @@ export type AiConfig = {
     model: string; imageModel: string; videoModel: string; textModel: string; audioModel: string;
     audioVoice: string; audioFormat: string; audioSpeed: string; audioInstructions: string;
     videoSeconds: string; vquality: string; videoGenerateAudio: string; videoWatermark: string; videoMode: string;
+    firstFrameId?: string; lastFrameId?: string;
     systemPrompt: string; reasoningEffort: ReasoningEffort; models: string[]; quality: string; size: string; background: string;
     count: string; canvasImageCount: string;
     nodeRegenerateBehavior: "new-node" | "overwrite"; autoFocusOnSelect: boolean;
@@ -95,7 +97,7 @@ function normalizeLockedConfig(input: Partial<AiConfig>): AiConfig {
     return {
         ...base, channelMode: "local", baseUrl: LOCKED_API_BASE_URL, apiKey, apiFormat: "openai", channels: [channel], models: models.map((model) => encodeChannelModel(LOCKED_CHANNEL_ID, model.name)),
         model: optionFor(models, input.model || input.imageModel, "image", defaultConfig.imageModel), imageModel: optionFor(models, input.imageModel || input.model, "image", defaultConfig.imageModel), videoModel: optionFor(models, input.videoModel, "video", defaultConfig.videoModel), textModel: optionFor(models, input.textModel || input.model, "text", defaultConfig.textModel), audioModel: optionFor(models, input.audioModel, "audio", defaultConfig.audioModel),
-        audioVoice: input.audioVoice || defaultConfig.audioVoice, audioFormat: input.audioFormat || defaultConfig.audioFormat, audioSpeed: input.audioSpeed || defaultConfig.audioSpeed, audioInstructions: input.audioInstructions || "", videoSeconds: input.videoSeconds || defaultConfig.videoSeconds, vquality: input.vquality || defaultConfig.vquality, videoGenerateAudio: input.videoGenerateAudio || defaultConfig.videoGenerateAudio, videoWatermark: input.videoWatermark || defaultConfig.videoWatermark, videoMode: input.videoMode === "reference" ? "reference" : "frames", canvasImageCount: input.canvasImageCount || defaultConfig.canvasImageCount, reasoningEffort: input.reasoningEffort || "auto", nodeRegenerateBehavior: input.nodeRegenerateBehavior === "overwrite" ? "overwrite" : "new-node", autoFocusOnSelect: Boolean(input.autoFocusOnSelect),
+        audioVoice: input.audioVoice || defaultConfig.audioVoice, audioFormat: input.audioFormat || defaultConfig.audioFormat, audioSpeed: input.audioSpeed || defaultConfig.audioSpeed, audioInstructions: input.audioInstructions || "", videoSeconds: input.videoSeconds || defaultConfig.videoSeconds, vquality: input.vquality || defaultConfig.vquality, videoGenerateAudio: input.videoGenerateAudio || defaultConfig.videoGenerateAudio, videoWatermark: input.videoWatermark || defaultConfig.videoWatermark, videoMode: normalizeVideoMode(input.videoMode), canvasImageCount: input.canvasImageCount || defaultConfig.canvasImageCount, reasoningEffort: input.reasoningEffort || "auto", nodeRegenerateBehavior: input.nodeRegenerateBehavior === "overwrite" ? "overwrite" : "new-node", autoFocusOnSelect: Boolean(input.autoFocusOnSelect),
     };
 }
 
