@@ -122,6 +122,7 @@ frontend/workbenches/infinite-canvas/tests/*
 !frontend/workbenches/infinite-canvas/tests/minimax-h3.test.mjs
 !frontend/workbenches/infinite-canvas/tests/h3-model-selection.test.ts
 !frontend/workbenches/infinite-canvas/tests/video-references.test.ts
+!frontend/workbenches/infinite-canvas/tests/video-concurrency.cjs
 !deploy/tests/
 !deploy/tests/**
 CLAUDE.md
