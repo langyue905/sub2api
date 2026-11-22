@@ -261,6 +261,7 @@ export default {
       USERNAME_EXISTS: 'That username is already in use. Please choose another.',
       USERNAME_INVALID: 'Username format is invalid.',
       USERNAME_REQUIRED: 'Username is required.',
+      EMAIL_BLOCKED: 'This email address is not allowed. Please use a different one.',
     },
     registrationFailed: 'Registration failed. Please try again.',
     emailDomainRegistrationLimit:

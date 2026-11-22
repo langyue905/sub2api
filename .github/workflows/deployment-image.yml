@@ -8,6 +8,7 @@ on:
       - codex/video-https-upstream-0216
       - codex/minimax-h3-full-adapter-20261022
       - codex/canvas-h3-933-20261023
+      - codex/upgrade-v0.2.24-20261122
     paths-ignore:
       - '**.md'
   workflow_dispatch:
@@ -80,7 +81,7 @@ jobs:
         run: |
           suffix="canvas"
           version="$(cat backend/cmd/server/VERSION)-zsh-canvas"
-          if [[ "$GITHUB_REF_NAME" == "integration/v0.2.15-video-plugin" || "$GITHUB_REF_NAME" == "codex/video-https-upstream-0216" || "$GITHUB_REF_NAME" == "codex/minimax-h3-full-adapter-20261022" || "$GITHUB_REF_NAME" == "codex/canvas-h3-933-20261023" ]]; then
+          if [[ "$GITHUB_REF_NAME" == "integration/v0.2.15-video-plugin" || "$GITHUB_REF_NAME" == "codex/video-https-upstream-0216" || "$GITHUB_REF_NAME" == "codex/minimax-h3-full-adapter-20261022" || "$GITHUB_REF_NAME" == "codex/canvas-h3-933-20261023" || "$GITHUB_REF_NAME" == "codex/upgrade-v0.2.24-20261122" ]]; then
             suffix="video"
             version="$(cat backend/cmd/server/VERSION)-zsh-video"
           fi

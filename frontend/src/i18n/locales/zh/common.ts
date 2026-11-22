@@ -261,6 +261,7 @@ export default {
       USERNAME_EXISTS: '用户名已被使用，请换一个',
       USERNAME_INVALID: '用户名格式不正确',
       USERNAME_REQUIRED: '请输入用户名',
+      EMAIL_BLOCKED: '该邮箱不允许注册，请更换其他邮箱。',
     },
     registrationFailed: '注册失败，请重试。',
     emailDomainRegistrationLimit:

@@ -58,14 +58,15 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 
 	// 确定目标URL
 	targetURL := claudeAPIURL
+	baseURL := ""
 	if account.Type == AccountTypeAPIKey {
-		baseURL := account.GetBaseURL()
+		baseURL = getAnthropicGatewayBaseURL(account)
 		if baseURL != "" {
 			validatedURL, err := s.validateUpstreamBaseURL(baseURL)
 			if err != nil {
 				return nil, nil, err
 			}
-			targetURL = validatedURL + "/v1/messages?beta=true"
+			targetURL = buildAnthropicMessagesURL(validatedURL)
 		}
 	} else if account.IsCustomBaseURLEnabled() {
 		customURL := account.GetCustomBaseURL()
@@ -155,9 +156,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	}
 
 	// Ollama Cloud DeepSeek 出站 max_tokens clamp：判定与上方 targetURL 的
-	// base 取值同源（GetBaseURL），仅实际上游为 ollama.com 且映射后出站模型
+	// base 取值同源，仅实际上游为 ollama.com 且映射后出站模型
 	// 为 DeepSeek 系时压到 cap，详见 helper 注释。
-	body = clampOllamaCloudAnthropicMessagesMaxTokens(account, account.GetBaseURL(), body)
+	body = clampOllamaCloudAnthropicMessagesMaxTokens(account, baseURL, body)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
@@ -170,7 +171,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	} else {
 		// Ollama Cloud Anthropic 兼容端点按实际 base_url 强制 Bearer（同上方
 		// targetURL 的 base 取值），其余保持 extra/default 行为。
-		setAnthropicAPIKeyAuthHeader(req.Header, account, token, account.GetBaseURL())
+		setAnthropicAPIKeyAuthHeader(req.Header, account, token, baseURL)
 	}
 
 	// 白名单透传 headers
@@ -247,13 +248,23 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// Always capture a compact fingerprint line for later error diagnostics.
 	// We only print it when needed (or when the explicit debug flag is enabled).
 	if c != nil && tokenType == "oauth" {
-		c.Set(claudeMimicDebugInfoKey, buildClaudeMimicDebugLine(req, body, account, tokenType, mimicClaudeCode))
+		c.Set(claudeMimicDebugInfoKey, newClaudeMimicDebugLine(req, body, account, tokenType, mimicClaudeCode))
 	}
 	if s.debugClaudeMimicEnabled() {
 		logClaudeMimicDebug(req, body, account, tokenType, mimicClaudeCode)
 	}
 
 	return req, body, nil
+}
+
+func getAnthropicGatewayBaseURL(account *Account) string {
+	if account == nil {
+		return ""
+	}
+	if baseURL := account.GetAnthropicProtocolBaseURL(); baseURL != "" {
+		return baseURL
+	}
+	return account.GetBaseURL()
 }
 
 // vertexSupportedBetaTokens 是 Vertex AI 的 Anthropic 端点接受的 anthropic-beta
@@ -430,7 +441,7 @@ func (s *GatewayService) getBetaHeader(modelID string, clientBetaHeader string) 
 
 func requestNeedsBetaFeatures(body []byte) bool {
 	tools := gjson.GetBytes(body, "tools")
-	if tools.Exists() && tools.IsArray() && len(tools.Array()) > 0 {
+	if tools.Exists() && tools.IsArray() && tools.Get("0").Exists() {
 		return true
 	}
 	thinkingType := gjson.GetBytes(body, "thinking.type").String()
@@ -459,9 +470,18 @@ func filterSonnet55ToolsetBeta(header string, body []byte, modelID string) strin
 	if !claude.IsSonnet55(modelID) && !claude.IsHaiku55(modelID) {
 		return header
 	}
-	for _, tool := range gjson.GetBytes(body, "tools").Array() {
-		switch tool.Get("type").String() {
-		case "computer_toolset_20260801", "browser_toolset_20260801":
+	tools := gjson.GetBytes(body, "tools")
+	if tools.IsArray() {
+		matched := false
+		tools.ForEach(func(_, tool gjson.Result) bool {
+			switch tool.Get("type").String() {
+			case "computer_toolset_20260801", "browser_toolset_20260801":
+				matched = true
+				return false
+			}
+			return true
+		})
+		if matched {
 			if !containsBetaToken(header, claude.BetaFineGrainedToolStreaming) {
 				return header
 			}

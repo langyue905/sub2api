@@ -1158,7 +1158,7 @@ function buildRegistrationErrorMessage(error: unknown, fallback: string): string
   if (code === 'EMAIL_DOMAIN_REGISTRATION_LIMIT') {
     return t('auth.emailDomainRegistrationLimit')
   }
-  if (code === 'USERNAME_EXISTS' || code === 'USERNAME_INVALID' || code === 'USERNAME_REQUIRED') {
+  if (code === 'USERNAME_EXISTS' || code === 'USERNAME_INVALID' || code === 'USERNAME_REQUIRED' || code === 'EMAIL_BLOCKED') {
     return t(`auth.errors.${code}`)
   }
   return buildAuthErrorMessage(error, { fallback })
