@@ -411,6 +411,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		}
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
+		var videoBillingPricing *service.VideoBillingPricing
+		if isGrokVideoCreateEndpoint(endpoint) {
+			videoBillingPricing = h.gatewayService.CaptureVideoBillingPricing(requestCtx, apiKey, routingModel, requestInfo.Resolution, requestInfo.DurationSeconds)
+		}
 		forwardStart := time.Now()
 		writerSizeBeforeForward := c.Writer.Size()
 		result, err := func() (*service.OpenAIForwardResult, error) {
@@ -526,6 +530,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				VideoResolution:      result.VideoResolution,
 				VideoDurationSeconds: result.VideoDurationSeconds,
 				OriginalModel:        clientRequestedModel(c, requestModel),
+				Pricing:              videoBillingPricing,
 				// Wall-clock start for usage duration_ms: create accepted → first done discovery.
 				CreatedAt: videoCreateStartedAt,
 			}
@@ -690,10 +695,16 @@ func prepareGrokVideoCompletionBilling(
 		if pending.VideoDurationSeconds < 4 || pending.VideoDurationSeconds > 15 {
 			return nil
 		}
-		if err := h.gatewayService.ValidateMiniMaxH3Pricing(ctx, apiKey, firstNonEmptyString(pending.BillingModel, pending.Model), pending.VideoResolution); err != nil {
-			reqLog.Error("grok_media.h3_completion_pricing_unavailable", zap.String("request_id", taskRequestID))
-			return nil
+		if pending.Pricing == nil {
+			if err := h.gatewayService.ValidateMiniMaxH3Pricing(ctx, apiKey, firstNonEmptyString(pending.BillingModel, pending.Model), pending.VideoResolution); err != nil {
+				reqLog.Error("grok_media.h3_completion_pricing_unavailable", zap.String("request_id", taskRequestID))
+				return nil
+			}
 		}
+	}
+	if pending != nil && pending.Pricing != nil && !pending.Pricing.Valid() {
+		reqLog.Error("grok_media.video_billing_invalid_pricing_snapshot", zap.String("request_id", taskRequestID))
+		return nil
 	}
 	claimed, err := h.gatewayService.ClaimGrokVideoBilling(ctx, taskRequestID, subject.UserID, apiKey.ID)
 	if err != nil {
@@ -707,6 +718,7 @@ func prepareGrokVideoCompletionBilling(
 	// Re-merge with pending: resolution is request-only; model/duration fill gaps.
 	merged := *statusResult
 	if pending != nil {
+		merged.VideoBillingPricing = pending.Pricing
 		// Provider status may use its internal model ID. Preserve the model and
 		// billing alias accepted at creation, including account model mappings.
 		merged.Model = firstNonEmptyString(pending.Model, merged.Model, pending.OriginalModel)

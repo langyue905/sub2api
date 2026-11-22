@@ -197,6 +197,7 @@ export default {
         restrictModels: '限制模型',
         restrictModelsHint: '开启后，仅允许模型定价列表中的模型。不在列表中的模型请求将被拒绝。',
         defaultPerRequestPrice: '默认单次价格（未命中层级时使用）',
+        videoPerRequestHint: '视频按次：一次请求生成一条视频，仅成功后收取一次，不乘时长。可按分辨率配置层级；未匹配时使用默认单次价。',
         defaultImagePrice: '默认图片价格（未命中层级时使用）',
         defaultVideoPrice: '默认视频每秒价格（未命中层级时使用）',
         platformConfig: '平台配置',

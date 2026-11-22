@@ -864,13 +864,24 @@ func (s *OpenAIGatewayService) ValidateVideoPluginPricing(ctx context.Context, a
 		return s.ValidateMiniMaxH3Pricing(ctx, apiKey, model, resolution)
 	}
 
+	resolved := s.resolveOpenAIChannelPricing(ctx, model, apiKey)
+	if resolved != nil && resolved.Source == PricingSourceGroup && resolved.Mode == BillingModePerRequest {
+		if validCost(videoPerRequestPrice(resolved, NormalizeVideoBillingResolutionOrDefault(resolution))) {
+			return nil
+		}
+		return fmt.Errorf("%w: video model %s requires a positive per-request price", ErrModelPricingUnavailable, model)
+	}
 	if apiKeyHasConfiguredVideoPrice(apiKey, model, NormalizeVideoBillingResolutionOrDefault(resolution)) {
 		return nil
 	}
-	if resolved := s.resolveOpenAIChannelPricing(ctx, model, apiKey); resolved != nil {
+	if resolved != nil {
 		switch resolved.Mode {
-		case BillingModeToken, BillingModeVideo, BillingModePerRequest, BillingModeImage:
+		case BillingModeToken, BillingModeVideo, BillingModeImage:
 			return nil
+		case BillingModePerRequest:
+			if validCost(videoPerRequestPrice(resolved, NormalizeVideoBillingResolutionOrDefault(resolution))) {
+				return nil
+			}
 		}
 	}
 	return fmt.Errorf("%w: video model %s", ErrModelPricingUnavailable, model)
@@ -881,6 +892,12 @@ func (s *OpenAIGatewayService) ValidateMiniMaxH3Pricing(ctx context.Context, api
 	tier := miniMaxH3Tier(resolution)
 	if tier != "" {
 		resolved := s.resolveOpenAIChannelPricing(ctx, model, apiKey)
+		if resolved != nil && resolved.Source == PricingSourceGroup && resolved.Mode == BillingModePerRequest {
+			if validCost(videoPerRequestPrice(resolved, tier)) {
+				return nil
+			}
+			return fmt.Errorf("%w: MiniMax-H3 group per-request price missing for %s", ErrModelPricingUnavailable, tier)
+		}
 		if resolved != nil && resolved.Source == PricingSourceGroup && resolved.Mode == BillingModeVideo {
 			if h3HasExactVideoPrice(resolved, tier) {
 				return nil
@@ -895,6 +912,9 @@ func (s *OpenAIGatewayService) ValidateMiniMaxH3Pricing(ctx context.Context, api
 		if h3HasExactVideoPrice(resolved, tier) {
 			return nil
 		}
+		if resolved != nil && resolved.Mode == BillingModePerRequest && validCost(videoPerRequestPrice(resolved, tier)) {
+			return nil
+		}
 	}
-	return fmt.Errorf("%w: MiniMax-H3 requires a positive per-second price for %s", ErrModelPricingUnavailable, resolution)
+	return fmt.Errorf("%w: MiniMax-H3 requires a positive per-second or per-request price for %s", ErrModelPricingUnavailable, resolution)
 }

@@ -1089,7 +1089,7 @@ export default {
       },
       videoPricing: {
         pluginDescription: '视频插件必须明确配置模型价格。可填写下方每秒价格，或在逐模型/渠道定价中设置按次或 Token 计费；不使用 Grok 默认价格。',
-        pluginModeHint: '每秒价格 × 实际时长 × 视频数量 × 倍率。采用按次或 Token 定价时，按对应定价方式结算。',
+        pluginModeHint: '此处价格按秒计算。按次视频请在“分组逐模型定价”添加模型并选择“按次”，填写每条视频价格；成功后收一次，不乘时长。分组逐模型定价优先于此处及渠道价格。',
         customModel: '填写视频模型 ID',
         title: '视频生成计费',
         description:

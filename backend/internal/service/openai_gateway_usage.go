@@ -599,7 +599,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		return s.billingService.CalculateWebSearchCost(result.WebSearchCalls, webSearchPricePerCallFromAPIKey(apiKey), webSearchMultiplier), nil
 	}
 	if isGrokVideoUsageResult(result, billingModels) {
-		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
+		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); result.VideoBillingPricing != nil || resolved == nil || resolved.Mode != BillingModeToken {
 			return s.calculateOpenAIVideoCost(ctx, billingModel, apiKey, result, videoMultiplier), nil
 		}
 	}
@@ -824,6 +824,9 @@ func (s *OpenAIGatewayService) calculateOpenAIVideoCost(
 	result *OpenAIForwardResult,
 	multiplier float64,
 ) *CostBreakdown {
+	if result.VideoBillingPricing != nil {
+		return result.VideoBillingPricing.cost(billingModel, result.VideoCount, result.VideoDurationSeconds, multiplier)
+	}
 	videoCount := result.VideoCount
 	if videoCount <= 0 {
 		videoCount = 1
@@ -831,6 +834,9 @@ func (s *OpenAIGatewayService) calculateOpenAIVideoCost(
 	resolution := NormalizeVideoBillingResolutionOrDefault(result.VideoResolution)
 	durationSeconds := NormalizeVideoBillingDurationForModel(billingModel, result.VideoDurationSeconds)
 	resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey)
+	if resolved != nil && resolved.Source == PricingSourceGroup && resolved.Mode == BillingModePerRequest {
+		return (&VideoBillingPricing{Mode: BillingModePerRequest, UnitPrice: videoPerRequestPrice(resolved, resolution)}).cost(billingModel, videoCount, durationSeconds, multiplier)
+	}
 	if resolved != nil && resolved.Source == PricingSourceGroup && resolved.Mode == BillingModeVideo {
 		gid := apiKey.Group.ID
 		cost, err := s.billingService.CalculateCostUnified(CostInput{
@@ -856,6 +862,9 @@ func (s *OpenAIGatewayService) calculateOpenAIVideoCost(
 	}
 	if resolved != nil && resolved.Source == PricingSourceChannel &&
 		(resolved.Mode == BillingModePerRequest || resolved.Mode == BillingModeImage || resolved.Mode == BillingModeVideo) {
+		if resolved.Mode == BillingModePerRequest {
+			return (&VideoBillingPricing{Mode: BillingModePerRequest, UnitPrice: videoPerRequestPrice(resolved, resolution)}).cost(billingModel, videoCount, durationSeconds, multiplier)
+		}
 		// 渠道 per_request/image 定价保持"按请求次数"口径（价格由管理员按次配置），不乘视频时长。
 		gid := apiKey.Group.ID
 		units := float64(videoCount)

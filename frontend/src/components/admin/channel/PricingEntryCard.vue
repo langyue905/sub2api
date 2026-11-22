@@ -190,6 +190,7 @@
 
         <!-- Per-request mode -->
         <div v-else-if="entry.billing_mode === 'per_request'">
+          <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.channels.form.videoPerRequestHint') }}</p>
           <!-- Default per-request price -->
           <label class="mt-3 block text-xs font-medium text-gray-500 dark:text-gray-400">
             {{ t('admin.channels.form.defaultPerRequestPrice') }}

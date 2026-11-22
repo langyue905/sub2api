@@ -432,14 +432,20 @@ function paidPerMillion(value: number | null | undefined, period: PlazaTimePrici
 }
 
 /** 图片和视频分别使用对应的独立倍率开关。 */
+function usesVideoRate(m: PlazaModel): boolean {
+  return billingMode(m) === BILLING_MODE_VIDEO ||
+    (billingMode(m) === BILLING_MODE_PER_REQUEST &&
+      (m.platform === 'video-plugin' || m.name.toLowerCase().startsWith('grok-imagine-video')))
+}
+
 function usesIndependentMediaRate(m: PlazaModel): boolean {
   return (billingMode(m) === BILLING_MODE_IMAGE && props.imageRateIndependent === true) ||
-    (billingMode(m) === BILLING_MODE_VIDEO && props.videoRateIndependent === true)
+    (usesVideoRate(m) && props.videoRateIndependent === true)
 }
 
 /** 非 token 行的生效倍率，图片和视频可分别覆盖通用倍率。 */
 function requestRate(m: PlazaModel): number {
-  if (billingMode(m) === BILLING_MODE_VIDEO && props.videoRateIndependent === true) {
+  if (usesVideoRate(m) && props.videoRateIndependent === true) {
     return Math.max(0, props.videoRateMultiplier ?? 1)
   }
   return billingMode(m) === BILLING_MODE_IMAGE && props.imageRateIndependent === true

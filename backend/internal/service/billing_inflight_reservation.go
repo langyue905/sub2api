@@ -589,11 +589,13 @@ func (d inflightEstimateDeps) estimateOne(ctx context.Context, apiKey *APIKey, m
 			cost = tokenCost()
 		}
 	case InflightEstimateVideo:
-		if perRequestMode {
-			cost = maxPerRequestPrice(resolved) * float64(units) * math.Max(textRate, imageRate)
-		}
 		if d.billing != nil {
-			if b := d.billing.CalculateVideoCost(model, req.VideoResolution, units, req.VideoDurationSeconds, videoPriceConfigFromAPIKey(apiKey), math.Max(textRate, imageRate)); b != nil && b.ActualCost > cost {
+			// Use the same group/channel precedence and units as settlement. A
+			// per-request video must not reserve a per-second fallback amount.
+			gateway := &OpenAIGatewayService{billingService: d.billing, resolver: d.resolver}
+			if b := gateway.calculateOpenAIVideoCost(ctx, model, apiKey, &OpenAIForwardResult{
+				VideoCount: units, VideoResolution: req.VideoResolution, VideoDurationSeconds: req.VideoDurationSeconds,
+			}, resolveVideoRateMultiplier(apiKey, textRate)); b != nil {
 				cost = b.ActualCost
 			}
 		}
@@ -644,7 +646,7 @@ func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req 
 		return 0, true
 	}
 	textRate, imageRate := d.rates(ctx, apiKey)
-	if textRate <= 0 && imageRate <= 0 {
+	if textRate <= 0 && imageRate <= 0 && (req.Kind != InflightEstimateVideo || resolveVideoRateMultiplier(apiKey, textRate) <= 0) {
 		// 免费分组：不计费，也无需预留。
 		return 0, true
 	}

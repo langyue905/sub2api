@@ -1092,7 +1092,7 @@ export default {
       },
       videoPricing: {
         pluginDescription: 'Video plugins require explicit model pricing. Set per-second rates here, or configure per-request or token pricing in model/channel pricing. Grok defaults do not apply.',
-        pluginModeHint: 'Per-second rate × actual duration × video count × multiplier. Per-request or token pricing uses the corresponding billing mode.',
+        pluginModeHint: 'Prices here are per second. For per-request video, add the model under Group Model Pricing, select Per Request and set the price per video. Charge once on success without multiplying by duration. Group model pricing takes priority over this section and channel prices.',
         customModel: 'Enter video model ID',
         title: 'Video Generation Pricing',
         description:

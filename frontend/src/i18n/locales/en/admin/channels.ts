@@ -197,6 +197,7 @@ export default {
         restrictModels: 'Restrict Models',
         restrictModelsHint: 'When enabled, only models in the pricing list are allowed. Others will be rejected.',
         defaultPerRequestPrice: 'Default per-request price (fallback when no tier matches)',
+        videoPerRequestHint: 'Video per request: one request produces one video, charged once on success without multiplying by duration. Resolution tiers may override the default per-request price.',
         defaultImagePrice: 'Default image price (fallback when no tier matches)',
         defaultVideoPrice: 'Default video price per second (fallback when no tier matches)',
         platformConfig: 'Platform Configuration',
