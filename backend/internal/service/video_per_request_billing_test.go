@@ -23,9 +23,9 @@ func videoRequestPricingService(t *testing.T, source string, mode BillingMode, p
 	cs := &ChannelService{}
 	cache := newEmptyChannelCache()
 	cache.loadedAt = time.Now()
-	cache.pricingByGroupModel[channelModelKey{groupID: groupID, model: "MiniMax-H3"}] = &entry
+	cache.pricingByGroupModel[channelModelKey{groupID: groupID, platform: PlatformVideoPlugin, model: normalizeChannelPricingModelName("MiniMax-H3")}] = &entry
 	cache.channelByGroupID[groupID] = &Channel{ID: groupID, Status: StatusActive}
-	cache.groupPlatform[groupID] = ""
+	cache.groupPlatform[groupID] = PlatformVideoPlugin
 	cs.cache.Store(cache)
 	if source == PricingSourceGroup {
 		key.Group.ModelPricing = []ChannelModelPricing{entry}
@@ -41,9 +41,14 @@ func TestVideoPerRequestPricingDoesNotMultiplyDuration(t *testing.T) {
 				if mode == BillingModeVideo {
 					// H3 per-second prices still require an exact resolution tier.
 					resolved := svc.resolveOpenAIChannelPricing(context.Background(), "MiniMax-H3", key)
-					resolved.channelPricing.Intervals = []PricingInterval{{TierLabel: "2k", PerRequestPrice: resolved.channelPricing.PerRequestPrice}}
+					require.NotNil(t, resolved)
+					intervals := []PricingInterval{{TierLabel: "2k", PerRequestPrice: resolved.channelPricing.PerRequestPrice}}
+					resolved.channelPricing.Intervals = intervals
 					if source == PricingSourceGroup {
-						key.Group.ModelPricing[0].Intervals = resolved.channelPricing.Intervals
+						key.Group.ModelPricing[0].Intervals = intervals
+					} else {
+						cache := svc.resolver.channelService.cache.Load().(*channelCache)
+						cache.pricingByGroupModel[channelModelKey{groupID: key.Group.ID, platform: PlatformVideoPlugin, model: normalizeChannelPricingModelName("MiniMax-H3")}].Intervals = intervals
 					}
 				}
 				for _, seconds := range []int{4, 15} {

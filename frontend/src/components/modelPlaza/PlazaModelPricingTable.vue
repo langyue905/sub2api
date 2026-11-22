@@ -337,6 +337,7 @@ import { formatScaled, resolveIntervalPrices } from '@/utils/pricing'
 import { platformAccentColor, platformBadgeLightClass, platformLabel } from '@/utils/platformColors'
 import {
   BILLING_MODE_TOKEN,
+  BILLING_MODE_PER_REQUEST,
   BILLING_MODE_IMAGE,
   BILLING_MODE_VIDEO,
   REASONING_EFFORT_LEVELS,

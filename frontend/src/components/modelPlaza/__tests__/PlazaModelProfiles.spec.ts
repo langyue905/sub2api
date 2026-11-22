@@ -6,6 +6,9 @@ import ModelPlazaProfilesEditor from '@/components/admin/ModelPlazaProfilesEdito
 import type { ModelPlazaGroup, PlazaModel, PlazaModelProfile } from '@/api/modelPlaza'
 
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ cachedPublicSettings: null }) }))
+vi.mock('@/composables/useClipboard', () => ({
+  useClipboard: () => ({ copyToClipboard: vi.fn() })
+}))
 vi.mock('vue-i18n', async () => {
   const { default: dashboard } = await import('@/i18n/locales/zh/dashboard')
   const { default: settings } = await import('@/i18n/locales/zh/admin/settings')
